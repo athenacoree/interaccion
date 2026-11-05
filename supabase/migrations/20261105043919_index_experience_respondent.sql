@@ -1,0 +1,1 @@
+create index experience_entries_respondent_id_idx on public.experience_entries(respondent_id);
