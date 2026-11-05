@@ -187,8 +187,29 @@ function ProfileEditor({ profile, user, editing, setEditing, onSaved }) {
   </section>;
 }
 
+const creatorTemplates = {
+  know_me: [
+    { title: '¿Qué tanto me conoces?', prompts: ['¿Cuál es mi comida favorita?', '¿Qué música escucho más?', '¿Qué es lo que más me gusta hacer?'] },
+    { title: '¿Quién me conoce mejor?', prompts: ['¿Cuál sería mi plan perfecto?', '¿Qué cosa no soporto?', '¿Cuál es uno de mis mayores sueños?'] },
+    { title: '¿Cuánto sabes de mí?', prompts: ['¿Cuál es mi color favorito?', '¿Qué prefiero hacer en mi tiempo libre?'] },
+  ],
+  confession: [
+    { title: 'Déjame una confesión', prompts: ['Cuéntame algo que nunca me hayas dicho…'] },
+    { title: 'Dime algo sin filtros', prompts: ['¿Qué siempre has querido decirme?'] },
+    { title: 'Una pregunta anónima', prompts: ['Escribe aquí tu pregunta o mensaje…'] },
+  ],
+  comparison: [
+    { title: '¿Quién es más lindo?', prompts: ['Elige tu favorito'] },
+    { title: '¿Qué foto te gusta más?', prompts: ['¿Cuál elegirías?'] },
+    { title: '¿Cuál prefieres?', prompts: ['Vota por tu opción favorita'] },
+    { title: '¿Qué outfit es mejor?', prompts: ['¿Cuál combina mejor?'] },
+  ],
+};
+
 function Creator({ user, close, created }) {
-  const [kind, setKind] = useState('know_me');
+  const [step, setStep] = useState(1);
+  const [kind, setKind] = useState('');
+  const [template, setTemplate] = useState(-1);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [prompts, setPrompts] = useState(['']);
@@ -200,34 +221,87 @@ function Creator({ user, close, created }) {
   const [publish, setPublish] = useState(true);
   const current = kinds.find(k => k.id === kind);
   const needsOptions = kind !== 'confession';
+
+  function chooseKind(id) {
+    setKind(id); setTemplate(-1); setTitle(''); setDescription('');
+    setPrompts(['']); setOptions(['Opción 1', 'Opción 2']); setImageFiles([null, null]);
+    setStep(2); setError('');
+  }
+  function chooseTemplate(index) {
+    setTemplate(index);
+    if (index === -1) { setTitle(''); setPrompts(['']); }
+    else {
+      const preset = creatorTemplates[kind][index];
+      setTitle(preset.title); setPrompts(preset.prompts);
+    }
+    setStep(3);
+  }
   async function submit(e) {
     e.preventDefault(); setBusy(true); setError('');
     try {
       const cleanTitle = title.trim();
+      if (!cleanTitle) throw new Error('Escribe un título para tu juego.');
+      const cleanPrompts = prompts.map(x => x.trim()).filter(Boolean);
+      if (!cleanPrompts.length) throw new Error('Añade al menos una pregunta.');
+      if (kind === 'comparison' && imageFiles.filter(Boolean).length < 2) throw new Error('Añade las dos imágenes para crear la comparativa.');
+      if (needsOptions && options.filter(x => x.trim()).length < 2) throw new Error('Añade al menos dos opciones.');
       const slug = makeSlug(cleanTitle) + '-' + crypto.randomUUID().slice(0, 6);
-      const { data: ex, error: ee } = await supabase.from('experiences').insert({ owner_id: user.id, slug, kind, title: cleanTitle, description: description.trim(), status: publish ? 'published' : 'draft', is_public: true, settings: { allow_anonymous: anonymous } }).select().single();
+      const { data: ex, error: ee } = await supabase.from('experiences').insert({
+        owner_id: user.id, slug, kind, title: cleanTitle, description: description.trim(),
+        status: publish ? 'published' : 'draft', is_public: true,
+        settings: { allow_anonymous: anonymous, template: template === -1 ? 'custom' : String(template) }
+      }).select().single();
       if (ee) throw ee;
       let questionOptions = [];
       if (needsOptions) {
-        questionOptions = await Promise.all(options.map(async (label, i) => ({ label: label.trim(), image_url: imageFiles[i] ? await uploadImage(imageFiles[i], user.id) : null })).filter ? [] : []);
-        questionOptions = [];
-        for (let i = 0; i < options.length; i++) questionOptions.push({ label: options[i].trim(), image_url: imageFiles[i] ? await uploadImage(imageFiles[i], user.id) : null });
+        for (let i = 0; i < options.length; i++) {
+          const label = options[i].trim();
+          if (!label) continue;
+          questionOptions.push({ label, image_url: imageFiles[i] ? await uploadImage(imageFiles[i], user.id) : null });
+        }
       }
-      const questionRows = prompts.map((text, position) => ({ experience_id: ex.id, position, prompt: text.trim(), answer_type: kind === 'confession' ? 'text' : kind === 'comparison' ? 'image_choice' : 'single_choice', options: questionOptions, media: [] }));
+      const questionRows = cleanPrompts.map((prompt, position) => ({
+        experience_id: ex.id, position, prompt,
+        answer_type: kind === 'confession' ? 'text' : kind === 'comparison' ? 'image_choice' : 'single_choice',
+        options: questionOptions, media: []
+      }));
       const { error: qe } = await supabase.from('experience_questions').insert(questionRows);
       if (qe) throw qe;
       await created();
-    } catch (e1) { setError(e1.message || 'No se pudo crear.'); } finally { setBusy(false); }
+    } catch (e1) { setError(e1.message || 'No se pudo crear.'); }
+    finally { setBusy(false); }
   }
-  return <div className="overlay"><section className="modal creator-modal"><button className="x" onClick={close}>×</button><div className="kicker">NUEVA EXPERIENCIA</div><h2>Dale forma a tu idea.</h2><p className="subtle">Elige el formato y personaliza lo que verá la gente.</p>
-    <form className="form" onSubmit={submit}><label>Tipo de experiencia<select value={kind} onChange={e => setKind(e.target.value)}>{kinds.map(k => <option key={k.id} value={k.id}>{k.name}</option>)}</select></label><div className="kind-hint">{current.detail}</div>
-      <label>Título<input required maxLength="90" value={title} onChange={e => setTitle(e.target.value)} placeholder="Ej. ¿Cuánto me conoces?" /></label><label>Descripción<textarea maxLength="240" value={description} onChange={e => setDescription(e.target.value)} placeholder="Explica brevemente de qué trata…" /></label>
-      <div className="field-group"><span className="field-title">{kind === 'confession' ? 'Mensaje para quien participe' : kind === 'comparison' ? 'Pregunta para votar' : 'Preguntas del reto'}</span>
-      {prompts.map((value, index) => <div className="question-edit" key={index}><input required maxLength="180" value={value} onChange={e => setPrompts(v => v.map((x, i) => i === index ? e.target.value : x))} placeholder={kind === 'confession' ? 'Escribe aquí lo que quieras compartir…' : kind === 'comparison' ? 'Ej. ¿Cuál de estas dos fotos prefieres?' : 'Pregunta ' + (index + 1)} />{prompts.length > 1 && kind === 'know_me' && <button type="button" className="remove-question" onClick={() => setPrompts(v => v.filter((_, i) => i !== index))}>Quitar</button>}</div>)}
-      {kind === 'know_me' && prompts.length < 15 && <button type="button" className="add-option" onClick={() => setPrompts(v => [...v, ''])}>＋ Añadir otra pregunta</button>}</div>
-      {needsOptions && <div className="options-editor"><b>{kind === 'comparison' ? 'Las dos imágenes' : 'Opciones de respuesta'}</b>{options.map((op, i) => <div className="option-edit" key={i}><input required value={op} onChange={e => setOptions(v => v.map((x, j) => j === i ? e.target.value : x))} placeholder={'Opción ' + (i + 1)}/>{kind === 'comparison' && <label className="file-mini">Añadir foto<input type="file" accept="image/*" onChange={e => setImageFiles(v => v.map((x, j) => j === i ? e.target.files?.[0] || null : x))}/></label>}</div>)}{options.length < 6 && kind !== 'comparison' && <button type="button" className="add-option" onClick={() => setOptions(v => [...v, ''])}>＋ Añadir otra opción</button>}</div>}
-      <label className="check-row"><input type="checkbox" checked={anonymous} onChange={e => setAnonymous(e.target.checked)}/> Permitir participación anónima</label><label className="check-row"><input type="checkbox" checked={publish} onChange={e => setPublish(e.target.checked)}/> Publicar al crear</label><p className="tiny-note">Comparte contenido respetuoso. Las confesiones se mostrarán solo en tu panel, no públicamente.</p><Notice error={error}/><Button disabled={busy}>{busy ? 'Creando…' : publish ? 'Crear y publicar ↗' : 'Guardar borrador'}</Button>
-    </form>
+
+  return <div className="overlay"><section className="modal creator-modal creator-wizard">
+    <button className="x" onClick={close} aria-label="Cerrar">×</button>
+    <div className="wizard-progress"><span className={step >= 1 ? 'active' : ''}>01 · Tipo</span><i/><span className={step >= 2 ? 'active' : ''}>02 · Idea</span><i/><span className={step >= 3 ? 'active' : ''}>03 · Diseño</span></div>
+    {step === 1 && <>
+      <div className="kicker">CREAR JUEGO O EXPERIENCIA</div><h2>¿Qué quieres crear?</h2><p className="subtle">Primero elige el formato. Después podrás escoger una idea preparada o crear la tuya.</p>
+      <div className="creator-kind-grid">{kinds.map(k => <button type="button" className={'creator-kind-card ' + k.id} key={k.id} onClick={() => chooseKind(k.id)}><span>{k.icon}</span><b>{k.name}</b><small>{k.detail}</small><em>Elegir formato ↗</em></button>)}</div>
+    </>}
+    {step === 2 && current && <>
+      <button type="button" className="wizard-back" onClick={() => setStep(1)}>← Cambiar formato</button>
+      <div className="kicker">IDEAS PREPARADAS</div><h2>{current.name}</h2><p className="subtle">Puedes empezar con una de estas ideas o personalizar el título y las preguntas desde cero.</p>
+      <div className="template-grid">{creatorTemplates[kind].map((t,i) => <button type="button" className="template-card" key={t.title} onClick={() => chooseTemplate(i)}><span>✦ PLANTILLA {String(i+1).padStart(2,'0')}</span><b>{t.title}</b><small>{t.prompts.length} {t.prompts.length === 1 ? 'pregunta inicial' : 'preguntas iniciales'}</small><em>Usar esta idea ↗</em></button>)}<button type="button" className="template-card custom-template" onClick={() => chooseTemplate(-1)}><span>＋ TU PROPIA IDEA</span><b>Personalizado</b><small>Empieza con un título y contenido completamente tuyos.</small><em>Crear desde cero ↗</em></button></div>
+    </>}
+    {step === 3 && current && <>
+      <button type="button" className="wizard-back" onClick={() => setStep(2)}>← Volver a las ideas</button>
+      <div className="kicker">PERSONALIZA TU EXPERIENCIA</div><h2>{template === -1 ? 'Tu idea, tus reglas.' : title}</h2><p className="subtle">Puedes cambiar cualquier texto de la plantilla antes de publicarla.</p>
+      <form className="form" onSubmit={submit}>
+        <label>Título del juego<input required maxLength="90" value={title} onChange={e => setTitle(e.target.value)} placeholder={kind === 'comparison' ? 'Ej. ¿Quién es más lindo?' : kind === 'confession' ? 'Ej. Déjame una confesión' : 'Ej. ¿Qué tanto me conoces?'}/></label>
+        <label>Descripción<textarea maxLength="240" value={description} onChange={e => setDescription(e.target.value)} placeholder="Explica brevemente de qué trata…"/></label>
+        <div className="field-group"><span className="field-title">{kind === 'confession' ? 'Mensaje que verá quien participe' : kind === 'comparison' ? 'Pregunta para votar' : 'Preguntas del juego'}</span>
+          {prompts.map((value,index) => <div className="question-edit" key={index}><input required maxLength="180" value={value} onChange={e => setPrompts(v => v.map((x,i) => i === index ? e.target.value : x))} placeholder={kind === 'confession' ? 'Escribe aquí lo que quieras compartir…' : kind === 'comparison' ? 'Ej. ¿Cuál de estas opciones prefieres?' : 'Pregunta ' + (index+1)}/>{prompts.length > 1 && kind === 'know_me' && <button type="button" className="remove-question" onClick={() => setPrompts(v => v.filter((_,i) => i !== index))}>Quitar</button>}</div>)}
+          {kind === 'know_me' && prompts.length < 15 && <button type="button" className="add-option" onClick={() => setPrompts(v => [...v,''])}>＋ Añadir pregunta</button>}
+        </div>
+        {needsOptions && <div className="options-editor"><b>{kind === 'comparison' ? 'Opciones e imágenes' : 'Respuestas posibles'}</b>{options.map((op,i) => <div className="option-edit" key={i}><input required value={op} onChange={e => setOptions(v => v.map((x,j) => j === i ? e.target.value : x))} placeholder={kind === 'comparison' ? 'Nombre de la opción ' + (i+1) : 'Respuesta ' + (i+1)}/>{kind === 'comparison' && <label className="file-mini">Foto {i+1}<input required={i < 2 && !imageFiles[i]} type="file" accept="image/png,image/jpeg,image/webp,image/avif" onChange={e => setImageFiles(v => v.map((x,j) => j === i ? e.target.files?.[0] || null : x))}/></label>}</div>)}{options.length < (kind === 'comparison' ? 6 : 8) && <button type="button" className="add-option" onClick={() => {setOptions(v => [...v,'']);setImageFiles(v => [...v,null]);}}>＋ Añadir opción personalizada</button>}</div>}
+        <label className="check-row"><input type="checkbox" checked={anonymous} onChange={e => setAnonymous(e.target.checked)}/> Permitir participación anónima</label>
+        <label className="check-row"><input type="checkbox" checked={publish} onChange={e => setPublish(e.target.checked)}/> Publicar al crear</label>
+        <p className="tiny-note">Las confesiones solo serán visibles en tu panel privado. No publiques datos personales de otras personas sin su permiso.</p>
+        <Notice error={error}/>
+        <Button disabled={busy}>{busy ? 'Creando…' : publish ? 'Crear y publicar ↗' : 'Guardar borrador'}</Button>
+      </form>
+    </>}
   </section></div>;
 }
 
