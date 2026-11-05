@@ -165,17 +165,19 @@ function Dashboard({ user, signOut }) {
   const [success, setSuccess] = useState('');
   const [activity, setActivity] = useState([]);
   const [myEntries, setMyEntries] = useState([]);
+  const [inboxSummary, setInboxSummary] = useState([]);
   const [myEntriesLoading, setMyEntriesLoading] = useState(true);
   const [entriesLoading, setEntriesLoading] = useState(false);
   const [editingExperience, setEditingExperience] = useState(null);
   async function load() {
     setLoading(true); setMyEntriesLoading(true); setError('');
     const since = new Date(Date.now() - 30 * 86400000).toISOString();
-    const [profileResult, experienceResult, activityResult, historyResult] = await Promise.all([
+    const [profileResult, experienceResult, activityResult, historyResult, inboxResult] = await Promise.all([
       supabase.from('profiles').select('id,username,display_name,bio,avatar_url,is_public').eq('id', user.id).maybeSingle(),
       supabase.from('experiences').select('id,slug,kind,title,description,cover_url,is_public,status,settings,created_at,updated_at').eq('owner_id', user.id).order('created_at', { ascending: false }),
       supabase.from('profile_activity').select('event_type,experience_id,created_at,visitor_key').eq('profile_id', user.id).gte('created_at', since).order('created_at', { ascending: false }).limit(250),
-      supabase.rpc('get_my_experience_entries')
+      supabase.rpc('get_my_experience_entries'),
+      supabase.rpc('get_owner_inbox_summary')
     ]);
     let p = profileResult.data;
     if (!p) {
@@ -191,7 +193,8 @@ function Dashboard({ user, signOut }) {
     setItems(experienceResult.data || []);
     setActivity(activityResult.data || []);
     setMyEntries(Array.isArray(historyResult.data) ? historyResult.data : []);
-    if (experienceResult.error || activityResult.error || historyResult.error) setError((experienceResult.error || activityResult.error || historyResult.error).message);
+    setInboxSummary(Array.isArray(inboxResult.data) ? inboxResult.data : []);
+    if (experienceResult.error || activityResult.error || historyResult.error || inboxResult.error) setError((experienceResult.error || activityResult.error || historyResult.error || inboxResult.error).message);
     setLoading(false); setMyEntriesLoading(false);
   }
   useEffect(() => { load(); }, [user.id]);
@@ -282,6 +285,15 @@ function Dashboard({ user, signOut }) {
       <Notice error={error} success={success}/>
       {profile && <ProfileEditor profile={profile} user={user} onSaved={async p => { setProfile(p); setEditingProfile(false); setSuccess('Tu perfil se actualizó.'); }} editing={editingProfile} setEditing={setEditingProfile}/>}
       {!profile && !loading && <div className="panel"><h3>Completa tu perfil</h3><p className="subtle">No pudimos encontrar el perfil asociado a esta cuenta. Revisa el identificador y vuelve a intentarlo.</p><Button kind="soft" onClick={load}>Volver a cargar</Button></div>}
+      <section className="panel inbox-overview">
+        <div className="dash-title"><div><div className="kicker">TODO LO QUE TE HAN ENVIADO</div><h2>Bandeja de respuestas</h2></div><span>{inboxSummary.reduce((sum,x)=>sum+Number(x.total||0),0)} recibidas</span></div>
+        {inboxSummary.length ? <div className="inbox-overview-list">{inboxSummary.map(item => <article className="inbox-overview-row" key={item.id}>
+          <div className={'kind-icon ' + item.kind}>{kinds.find(k=>k.id===item.kind)?.icon || '✧'}</div>
+          <div className="inbox-overview-info"><b>{item.title}</b><small>{item.total} respuestas · {item.unread} sin leer{item.last_response ? ' · Última: '+new Date(item.last_response).toLocaleString() : ''}</small></div>
+          {Number(item.unread)>0 && <span className="inbox-unread-count">{item.unread} nuevas</span>}
+          <button type="button" onClick={()=>openEntries(item)}>Ver respuestas ↗</button>
+        </article>)}</div> : <p className="subtle">Todavía no has recibido respuestas. Cuando alguien participe, aparecerá aquí.</p>}
+      </section>
       {profile && <section className="activity-panel panel"><div className="dash-title"><div><div className="kicker">ÚLTIMOS 30 DÍAS</div><h2>Actividad de tu espacio</h2></div><span>Datos aproximados</span></div><div className="activity-stats"><article><small>Visitas al perfil</small><b>{activity.filter(x=>x.event_type==='profile_view').length}</b></article><article><small>Visitantes únicos estimados</small><b>{new Set(activity.filter(x=>x.event_type==='profile_view').map(x=>x.visitor_key)).size}</b></article><article><small>Juegos abiertos</small><b>{activity.filter(x=>x.event_type==='experience_view').length}</b></article><article><small>Respuestas enviadas</small><b>{activity.filter(x=>x.event_type==='experience_response').length}</b></article></div><div className="recent-activity">{activity.slice(0,6).map((a,i)=><div className="recent-activity-row" key={i}><span>{a.event_type==='profile_view'?'Visita al perfil':a.event_type==='experience_view'?'Abrió '+(items.find(x=>x.id===a.experience_id)?.title||'una experiencia'):'Nueva respuesta en '+(items.find(x=>x.id===a.experience_id)?.title||'una experiencia')}</span><time>{new Date(a.created_at).toLocaleString()}</time></div>)}</div><p className="tiny-note">Se cuentan visitantes únicos estimados por navegador y día. Las respuestas se cuentan por envío. No se recopilan direcciones IP ni se identifica personalmente a quien visita.</p></section>}
       <section className="panel participant-history">
         <div className="dash-title"><div><div className="kicker">TU ACTIVIDAD</div><h2>Mis participaciones</h2></div><span>{myEntries.length} guardadas</span></div>
