@@ -254,3 +254,7 @@
   .dash-actions>a{display:none}
   .inbox-overview,.participant-history,.activity-panel{padding:15px;border-radius:19px}
 }
+
+
+/* Sharing controls */
+.share-actions{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0 4px;align-items:center}.share-actions .btn{text-decoration:none;display:inline-flex;align-items:center;justify-content:center;min-height:42px}.share-actions-compact{margin:8px 0;gap:7px}.share-actions-compact .btn{min-height:36px;font-size:.88rem}@media(max-width:520px){.share-actions{display:grid;grid-template-columns:1fr 1fr}.share-actions .btn:first-child{grid-column:1/-1}}
