@@ -29,6 +29,22 @@ const uploadImage = async (file, userId) => {
   return supabase.storage.from('interaccion-media').getPublicUrl(path).data.publicUrl;
 };
 
+const getVisitorKey = () => {
+  try {
+    let key = localStorage.getItem('interaccion_visitor_key');
+    if (!key) { key = crypto.randomUUID(); localStorage.setItem('interaccion_visitor_key', key); }
+    return key;
+  } catch { return crypto.randomUUID(); }
+};
+async function trackActivity(profileId, experienceId, eventType) {
+  if (!supabase || !profileId) return;
+  const { error } = await supabase.from('profile_activity').insert({
+    profile_id: profileId, experience_id: experienceId || null,
+    visitor_key: getVisitorKey(), event_type: eventType
+  });
+  if (error && error.code !== '23505') console.warn('No se pudo registrar la actividad:', error.message);
+}
+
 function Brand() { return <a className="brand" href={BASE}><span className="brand-icon">i</span><span>interacción</span></a>; }
 function Button({ children, kind = 'primary', ...props }) { return <button className={'btn btn-' + kind} {...props}>{children}</button>; }
 function Notice({ error, success }) { return <>{error && <p className="notice error">{error}</p>}{success && <p className="notice success">{success}</p>}</>; }
@@ -130,6 +146,8 @@ function Dashboard({ user, signOut }) {
   const [selected, setSelected] = useState(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [activity, setActivity] = useState([]);
+  const [editingExperience, setEditingExperience] = useState(null);
   async function load() {
     setLoading(true); setError('');
     let { data: p, error: pe } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
@@ -142,8 +160,11 @@ function Dashboard({ user, signOut }) {
         if (!me) p = made; else setError(me.message);
       } else if (pe) setError(pe.message);
     }
-    const { data: ex, error: ee } = await supabase.from('experiences').select('*').eq('owner_id', user.id).order('created_at', { ascending: false });
-    setProfile(p); setItems(ex || []); if (ee) setError(ee.message); setLoading(false);
+    const [{ data: ex, error: ee }, { data: act, error: ae }] = await Promise.all([
+      supabase.from('experiences').select('*').eq('owner_id', user.id).order('created_at', { ascending: false }),
+      supabase.from('profile_activity').select('event_type,experience_id,created_at').eq('profile_id', user.id).gte('created_at', new Date(Date.now()-30*86400000).toISOString()).order('created_at',{ascending:false}).limit(5000)
+    ]);
+    setProfile(p); setItems(ex || []); setActivity(act || []); if (ee || ae) setError((ee || ae).message); setLoading(false);
   }
   useEffect(() => { load(); }, [user.id]);
   async function openEntries(item) {
@@ -164,6 +185,38 @@ function Dashboard({ user, signOut }) {
     const { error: e } = await supabase.from('experience_entries').delete().eq('experience_id', selected.id);
     if (e) setError(e.message); else { setEntries([]); setSelectedEntryIds([]); setSuccess('La bandeja quedó vacía.'); }
   }
+  async function changeStatus(item, status) {
+    const { error: e } = await supabase.from('experiences').update({ status, updated_at: new Date().toISOString() }).eq('id', item.id).eq('owner_id', user.id);
+    if (e) setError(e.message); else { setSuccess(status === 'published' ? 'Experiencia publicada.' : status === 'paused' ? 'Experiencia pausada.' : 'Estado actualizado.'); await load(); }
+  }
+  async function deleteExperience(item) {
+    if (!confirm('¿Eliminar «' + item.title + '» y todas sus respuestas? No se puede deshacer.')) return;
+    const { error: e } = await supabase.from('experiences').delete().eq('id', item.id).eq('owner_id', user.id);
+    if (e) setError(e.message); else { setSuccess('Experiencia eliminada.'); if (selected?.id === item.id) setSelected(null); await load(); }
+  }
+  async function duplicateExperience(item) {
+    const { data: qs, error: qe } = await supabase.from('experience_questions').select('*').eq('experience_id', item.id).order('position');
+    if (qe) { setError(qe.message); return; }
+    const slug = makeSlug(item.title) + '-' + crypto.randomUUID().slice(0,6);
+    const { data: copy, error: ce } = await supabase.from('experiences').insert({
+      owner_id:user.id, slug, kind:item.kind, title:item.title + ' (copia)', description:item.description,
+      cover_url:item.cover_url, is_public:true, status:'draft', settings:item.settings || {}
+    }).select().single();
+    if (ce) { setError(ce.message); return; }
+    if (qs?.length) {
+      const rows=qs.map(q=>({experience_id:copy.id,position:q.position,prompt:q.prompt,answer_type:q.answer_type,options:q.options,media:q.media}));
+      const {error:qe2}=await supabase.from('experience_questions').insert(rows);
+      if(qe2){await supabase.from('experiences').delete().eq('id',copy.id);setError(qe2.message);return;}
+    }
+    setSuccess('Copia creada como borrador.'); await load();
+  }
+  async function renameExperience(item) {
+    const title=prompt('Título de la experiencia',item.title); if(title===null)return;
+    const clean=title.trim(); if(!clean){setError('El título no puede quedar vacío.');return;}
+    const description=prompt('Descripción',item.description || ''); if(description===null)return;
+    const {error:e}=await supabase.from('experiences').update({title:clean,description:description.trim(),updated_at:new Date().toISOString()}).eq('id',item.id).eq('owner_id',user.id);
+    if(e)setError(e.message);else{setSuccess('Título y descripción actualizados.');await load();}
+  }
   async function removeEntry(id) {
     if (!confirm('¿Eliminar esta respuesta?')) return;
     const { error: e } = await supabase.from('experience_entries').delete().eq('id', id);
@@ -175,8 +228,9 @@ function Dashboard({ user, signOut }) {
       <Notice error={error} success={success}/>
       {profile && <ProfileEditor profile={profile} user={user} onSaved={async p => { setProfile(p); setEditingProfile(false); setSuccess('Tu perfil se actualizó.'); }} editing={editingProfile} setEditing={setEditingProfile}/>}
       {!profile && !loading && <div className="panel"><h3>Completa tu perfil</h3><p className="subtle">No pudimos encontrar el perfil asociado a esta cuenta. Revisa el identificador y vuelve a intentarlo.</p><Button kind="soft" onClick={load}>Volver a cargar</Button></div>}
+      {profile && <section className="activity-panel panel"><div className="dash-title"><div><div className="kicker">ÚLTIMOS 30 DÍAS</div><h2>Actividad de tu espacio</h2></div><span>Datos aproximados</span></div><div className="activity-stats"><article><small>Visitas al perfil</small><b>{activity.filter(x=>x.event_type==='profile_view').length}</b></article><article><small>Juegos abiertos</small><b>{activity.filter(x=>x.event_type==='experience_view').length}</b></article><article><small>Respuestas enviadas</small><b>{activity.filter(x=>x.event_type==='experience_response').length}</b></article></div><p className="tiny-note">Se cuentan visitantes únicos estimados por navegador y día. No se recopilan direcciones IP ni se identifica personalmente a quien visita.</p></section>}
       <div className="dash-title"><div><div className="kicker">TU CONTENIDO</div><h2>Tus experiencias</h2></div><span>{items.length} creadas</span></div>
-      {loading ? <div className="panel">Cargando tus experiencias…</div> : items.length ? <div className="my-grid">{items.map(item => <article className="my-card" key={item.id}><div className="my-card-top"><span className={'kind-icon ' + item.kind}>{kinds.find(k => k.id === item.kind)?.icon}</span><span className={'status ' + item.status}>{item.status === 'published' ? 'Publicada' : 'Borrador'}</span></div><h3>{item.title}</h3><p>{item.description || kinds.find(k => k.id === item.kind)?.detail}</p><div className="my-link">{publicUrl('e/' + item.slug)}</div><div className="my-card-actions"><button onClick={() => openEntries(item)}>Ver respuestas</button><a href={'#/e/' + item.slug} target="_blank" rel="noreferrer">Abrir ↗</a></div></article>)}</div> : <div className="empty panel"><span>✧</span><h3>Este espacio está esperando tu primera idea.</h3><p>Crea una experiencia y comparte el enlace con tus personas favoritas.</p><Button onClick={() => setShowCreator(true)}>Crear mi primera experiencia</Button></div>}
+      {loading ? <div className="panel">Cargando tus experiencias…</div> : items.length ? <div className="my-grid">{items.map(item => <article className="my-card" key={item.id}><div className="my-card-top"><span className={'kind-icon ' + item.kind}>{kinds.find(k => k.id === item.kind)?.icon}</span><span className={'status ' + item.status}>{item.status === 'published' ? 'Publicada' : item.status === 'paused' ? 'Pausada' : item.status === 'archived' ? 'Archivada' : 'Borrador'}</span></div><h3>{item.title}</h3><p>{item.description || kinds.find(k => k.id === item.kind)?.detail}</p><div className="my-link">{publicUrl('e/' + item.slug)}</div><div className="my-card-actions"><button onClick={() => openEntries(item)}>Respuestas</button>{item.status === 'published' ? <button onClick={() => changeStatus(item,'paused')}>Pausar</button> : <button onClick={() => changeStatus(item,'published')}>Publicar</button>}<button onClick={() => setEditingExperience(item)}>Editar</button><button onClick={() => duplicateExperience(item)}>Duplicar</button><button onClick={() => renameExperience(item)}>Título</button><button className="danger-link" onClick={() => deleteExperience(item)}>Eliminar</button><a href={'#/e/' + item.slug} target="_blank" rel="noreferrer">Abrir ↗</a></div></article>)}</div> : <div className="empty panel"><span>✧</span><h3>Este espacio está esperando tu primera idea.</h3><p>Crea una experiencia y comparte el enlace con tus personas favoritas.</p><Button onClick={() => setShowCreator(true)}>Crear mi primera experiencia</Button></div>}
       {selected && <section className="panel responses">
         <div className="responses-head"><div><div className="kicker">BANDEJA DE RESPUESTAS</div><h2>{selected.title}</h2><p className="subtle">{entries.length} respuestas recibidas</p></div><button className="close-small" onClick={() => setSelected(null)}>Cerrar ×</button></div>
         <div className="inbox-tools"><input value={entrySearch} onChange={e => setEntrySearch(e.target.value)} placeholder="Buscar por nombre o contenido…"/><div><button className="danger-link" disabled={!selectedEntryIds.length} onClick={removeSelectedEntries}>Eliminar seleccionadas ({selectedEntryIds.length})</button><button className="danger-link" disabled={!entries.length} onClick={clearEntries}>Vaciar bandeja</button></div></div>
@@ -187,7 +241,7 @@ function Dashboard({ user, signOut }) {
         </article>) : <p className="subtle">Todavía no hay respuestas para esta experiencia.</p>}
       </section>}
     </main>
-    {showCreator && <Creator user={user} close={() => setShowCreator(false)} created={async () => { setShowCreator(false); setSuccess('Tu experiencia ya está creada.'); await load(); }}/>}
+    {showCreator && <Creator user={user} close={() => setShowCreator(false)} created={async () => { setShowCreator(false); setSuccess('Tu experiencia ya está creada.'); await load(); }}/>}\n    {editingExperience && <ExperienceEditor item={editingExperience} close={() => setEditingExperience(null)} saved={async () => {setEditingExperience(null);setSuccess('Experiencia actualizada.');await load();}}/>}
   </div>;
 }
 
@@ -329,11 +383,38 @@ function Creator({ user, close, created }) {
   </section></div>;
 }
 
+function ExperienceEditor({item,close,saved}) {
+  const [title,setTitle]=useState(item.title || '');
+  const [description,setDescription]=useState(item.description || '');
+  const [questions,setQuestions]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');
+  useEffect(()=>{let live=true;(async()=>{const {data,error:e}=await supabase.from('experience_questions').select('*').eq('experience_id',item.id).order('position');if(live){if(e)setError(e.message);setQuestions(data||[]);setLoading(false);}})();return()=>{live=false;};},[item.id]);
+  function updateQuestion(index,patch){setQuestions(v=>v.map((q,i)=>i===index?{...q,...patch}:q));}
+  function updateOption(qi,oi,patch){setQuestions(v=>v.map((q,i)=>i===qi?{...q,options:(q.options||[]).map((o,j)=>j===oi?{...o,...patch}:o)}:q));}
+  function addQuestion(){setQuestions(v=>[...v,{id:null,position:v.length,prompt:'Nueva pregunta',answer_type:item.kind==='confession'?'text':item.kind==='comparison'?'image_choice':'single_choice',options:item.kind==='confession'?[]:[{label:'Opción 1',image_url:null},{label:'Opción 2',image_url:null}],media:{correct_option_index:0}}]);}
+  async function save(e){e.preventDefault();setBusy(true);setError('');try{
+    if(!title.trim())throw new Error('Escribe un título.');
+    if(!questions.length)throw new Error('Añade al menos una pregunta.');
+    if(questions.some(q=>!q.prompt.trim()))throw new Error('Todas las preguntas necesitan un texto.');
+    if(item.kind!=='confession'&&questions.some(q=>(q.options||[]).filter(o=>o.label?.trim()).length<2))throw new Error('Cada pregunta necesita al menos dos opciones.');
+    const {error:ue}=await supabase.from('experiences').update({title:title.trim(),description:description.trim(),updated_at:new Date().toISOString()}).eq('id',item.id);
+    if(ue)throw ue;
+    const keep=questions.filter(q=>q.id).map(q=>q.id);
+    if(keep.length){const {error:de}=await supabase.from('experience_questions').delete().eq('experience_id',item.id).not('id','in','('+keep.join(',')+')');if(de)throw de;}
+    else {const {error:de}=await supabase.from('experience_questions').delete().eq('experience_id',item.id);if(de)throw de;}
+    for(let i=0;i<questions.length;i++){const q=questions[i];const row={experience_id:item.id,position:i,prompt:q.prompt.trim(),answer_type:q.answer_type,options:(q.options||[]).filter(o=>o.label?.trim()),media:q.media||[]};const result=q.id?await supabase.from('experience_questions').update(row).eq('id',q.id):await supabase.from('experience_questions').insert(row);if(result.error)throw result.error;}
+    await saved();
+  }catch(err){setError(err.message||'No se pudieron guardar los cambios.');}finally{setBusy(false);}}
+  return <div className="overlay"><section className="modal editor-modal"><button className="x" onClick={close}>×</button><div className="kicker">EDITAR EXPERIENCIA</div><h2>Actualiza tu juego.</h2>{loading?<p>Cargando preguntas…</p>:<form className="form" onSubmit={save}><label>Título<input value={title} maxLength="100" onChange={e=>setTitle(e.target.value)} required/></label><label>Descripción<textarea value={description} maxLength="240" onChange={e=>setDescription(e.target.value)}/></label>{questions.map((q,qi)=><div className="edit-question-card" key={q.id||'new-'+qi}><div className="edit-question-top"><b>Pregunta {qi+1}</b><button type="button" className="danger-link" onClick={()=>setQuestions(v=>v.filter((_,i)=>i!==qi))}>Quitar</button></div><input value={q.prompt} onChange={e=>updateQuestion(qi,{prompt:e.target.value})} placeholder="Escribe la pregunta"/>{item.kind!=='confession'&&<div className="edit-options">{(q.options||[]).map((op,oi)=><div className="edit-option" key={oi}><input value={op.label||''} onChange={e=>updateOption(qi,oi,{label:e.target.value})} placeholder={'Opción '+(oi+1)}/>{item.kind==='comparison'&&<input value={op.image_url||''} onChange={e=>updateOption(qi,oi,{image_url:e.target.value})} placeholder="URL de imagen"/>}<button type="button" className="danger-link" onClick={()=>updateQuestion(qi,{options:q.options.filter((_,i)=>i!==oi)})}>×</button></div>)}<button type="button" className="add-option" onClick={()=>updateQuestion(qi,{options:[...(q.options||[]),{label:'Nueva opción',image_url:null}]})}>＋ Añadir opción</button>{item.kind==='know_me'&&<label>Respuesta correcta<select value={q.media?.correct_option_index??0} onChange={e=>updateQuestion(qi,{media:{...(q.media||{}),correct_option_index:Number(e.target.value)}})}>{(q.options||[]).map((op,i)=><option value={i} key={i}>{op.label||'Opción '+(i+1)}</option>)}</select></label>}</div>}</div>)}<button type="button" className="add-option" onClick={addQuestion}>＋ Añadir pregunta</button><Notice error={error}/><Button disabled={busy}>{busy?'Guardando…':'Guardar cambios'}</Button></form>}</section></div>;
+}
+
 function PublicProfile({ username, openAuth }) {
   const [profile, setProfile] = useState(null);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { let live = true; (async () => { const { data: p } = await supabase.from('profiles').select('username,display_name,bio,avatar_url,is_public').eq('username', username.toLowerCase()).maybeSingle(); if (!p?.is_public) { if (live) setLoading(false); return; } const { data: ex } = await supabase.from('experiences').select('id,slug,kind,title,description,created_at').eq('owner_id', (await supabase.from('profiles').select('id').eq('username', username.toLowerCase()).single()).data?.id).eq('status','published').eq('is_public',true).order('created_at',{ascending:false}); if (live) { setProfile(p); setItems(ex || []); setLoading(false); } })(); return () => { live = false; }; }, [username]);
+  useEffect(() => { let live = true; (async () => { const { data: p, error: pe } = await supabase.from('profiles').select('id,username,display_name,bio,avatar_url,is_public').eq('username', username.toLowerCase()).maybeSingle(); if (pe || !p?.is_public) { if (live) setLoading(false); return; } const { data: ex, error: ee } = await supabase.from('experiences').select('id,slug,kind,title,description,created_at').eq('owner_id', p.id).eq('status','published').eq('is_public',true).order('created_at',{ascending:false}); if (live) { setProfile(p); setItems(ex || []); setLoading(false); trackActivity(p.id, null, 'profile_view'); } })(); return () => { live = false; }; }, [username]);
   if (loading) return <PublicShell><div className="panel">Cargando perfil…</div></PublicShell>;
   if (!profile) return <PublicShell><div className="panel empty"><h2>Este perfil no está disponible.</h2><a href={BASE}>Volver al inicio</a></div></PublicShell>;
   return <PublicShell><section className="public-profile panel">{profile.avatar_url ? <img className="public-avatar" src={profile.avatar_url} alt=""/> : <div className="public-avatar avatar-placeholder">{profile.display_name.slice(0,1)}</div>}<div className="kicker">PERFIL PÚBLICO</div><h1>{profile.display_name}</h1><p className="subtle">@{profile.username}</p>{profile.bio && <p className="public-bio">{profile.bio}</p>}</section><section className="public-list"><div className="kicker">SUS EXPERIENCIAS</div><h2>Participa y descubre.</h2>{items.length ? <div className="my-grid">{items.map(x => <a className="my-card public-card" href={'#/e/' + x.slug} key={x.id}><span className="kind-icon">{kinds.find(k => k.id === x.kind)?.icon}</span><h3>{x.title}</h3><p>{x.description}</p><b>Abrir experiencia ↗</b></a>)}</div> : <div className="panel empty"><p>Aún no hay experiencias publicadas.</p></div>}</section><JoinCTA openAuth={openAuth}/></PublicShell>;
@@ -349,22 +430,31 @@ function PublicExperience({ slug, openAuth }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
-  useEffect(() => { let live = true; (async () => { const { data: ex } = await supabase.from('experiences').select('*').eq('slug', slug).eq('is_public',true).eq('status','published').maybeSingle(); if (!ex) { if (live) setItem(false); return; } const [{ data: qs }, { data: p }] = await Promise.all([supabase.from('experience_questions').select('*').eq('experience_id',ex.id).order('position'),supabase.from('profiles').select('username,display_name').eq('id',ex.owner_id).maybeSingle()]); if (live) { setItem(ex); setQuestions(qs || []); setOwner(p); } })(); return () => { live = false; }; }, [slug]);
+  const [score, setScore] = useState(null);
+  const [allowAnonymous, setAllowAnonymous] = useState(true);
+  useEffect(() => { let live = true; (async () => { const { data: ex, error: exError } = await supabase.from('experiences').select('*').eq('slug', slug).eq('is_public',true).eq('status','published').maybeSingle(); if (exError || !ex) { if (live) setItem(false); return; } const [{ data: qs }, { data: p }] = await Promise.all([supabase.from('experience_questions').select('*').eq('experience_id',ex.id).order('position'),supabase.from('profiles').select('id,username,display_name').eq('id',ex.owner_id).maybeSingle()]); if (live) { setItem(ex); setQuestions(qs || []); setOwner(p); setAllowAnonymous(ex.settings?.allow_anonymous !== false); setAnonymous(ex.settings?.allow_anonymous !== false); trackActivity(ex.owner_id, ex.id, 'experience_view'); } })(); return () => { live = false; }; }, [slug]);
   async function submit(e) {
     e.preventDefault(); setBusy(true); setError('');
     try {
       if (!supabase || !item) throw new Error('No se pudo conectar con esta experiencia.');
       const missing = questions.find(q => !String(answers[q.id] || '').trim());
       if (missing) throw new Error('Responde la pregunta antes de enviar.');
-      const { error: e1 } = await supabase.from('experience_entries').insert({ experience_id: item.id, respondent_name: anonymous ? null : name.trim(), is_anonymous: anonymous, answers });
-      if (e1) throw e1; setSuccess(true);
+      const isAnon = allowAnonymous ? anonymous : false;
+      if (!isAnon && !name.trim()) throw new Error('Escribe el nombre que quieres mostrar.');
+      const { error: e1 } = await supabase.from('experience_entries').insert({ experience_id: item.id, respondent_name: isAnon ? null : name.trim(), is_anonymous: isAnon, answers });
+      if (e1) throw e1;
+      if (item.kind === 'know_me') {
+        const correct = questions.filter(q => Number(q.media?.correct_option_index ?? 0) >= 0 && q.options?.[Number(q.media?.correct_option_index ?? 0)]?.label === answers[q.id]).length;
+        setScore({ correct, total: questions.length });
+      }
+      await trackActivity(item.owner_id, item.id, 'experience_response'); setSuccess(true);
     } catch (e1) { setError(e1.message); } finally { setBusy(false); }
   }
   if (item === null) return <PublicShell><div className="panel">Cargando experiencia…</div></PublicShell>;
   if (item === false) return <PublicShell><div className="panel empty"><h2>Este enlace no está disponible.</h2><a href={BASE}>Volver al inicio</a></div></PublicShell>;
   return <PublicShell><section className="experience-public panel"><div className="kicker">{kinds.find(k => k.id === item.kind)?.short.toUpperCase()}</div><h1>{item.title}</h1><p className="subtle">{item.description}</p>{owner && <a className="owner-link" href={'#/u/' + owner.username}>Creado por {owner.display_name} · @{owner.username}</a>}
-    {success ? <div className="success-screen"><span>✓</span><h2>¡Respuesta enviada!</h2><p>Gracias por participar. Tu respuesta llegó a su creador.</p></div> : <form className="form response-form" onSubmit={submit}>{questions.map(q => <div className="question-block" key={q.id}><h3>{q.prompt}</h3>{q.answer_type === 'text' ? <textarea required maxLength="1000" value={answers[q.id] || ''} onChange={e => setAnswers(v => ({...v,[q.id]:e.target.value}))} placeholder="Escribe tu mensaje…"/> : <div className="answer-options">{(q.options || []).map((op,i) => <label className={'answer-option ' + (answers[q.id] === op.label ? 'chosen' : '')} key={i}><input type="radio" name={q.id} checked={answers[q.id] === op.label} onChange={() => setAnswers(v => ({...v,[q.id]:op.label}))}/>{op.image_url && <img src={op.image_url} alt={op.label}/>}<span>{op.label}</span></label>)}</div>}</div>)}
-      <label className="check-row"><input type="checkbox" checked={anonymous} onChange={e => setAnonymous(e.target.checked)}/> Enviar de forma anónima</label>{!anonymous && <label>Tu nombre<input required value={name} onChange={e => setName(e.target.value)} maxLength="60" placeholder="Cómo quieres aparecer"/></label>}<Notice error={error}/><Button disabled={busy}>{busy ? 'Enviando…' : 'Enviar respuesta ↗'}</Button><p className="tiny-note">No necesitas crear una cuenta para participar. Comparte solo información que te sientas cómodo enviando.</p></form>}
+    {success ? <div className="success-screen"><span>✓</span><h2>¡Respuesta enviada!</h2><p>Gracias por participar. Tu respuesta llegó a su creador.</p>{score && <div className="quiz-score"><b>{score.correct} / {score.total}</b><small>respuestas correctas</small><p>{score.correct === score.total ? '¡Excelente! Conoces muy bien a esta persona.' : score.correct >= Math.ceil(score.total/2) ? '¡Nada mal! Has acertado varias.' : '¡Ahora ya sabes un poco más sobre esta persona!'}</p></div>}</div> : <form className="form response-form" onSubmit={submit}>{questions.map(q => <div className="question-block" key={q.id}><h3>{q.prompt}</h3>{q.answer_type === 'text' ? <textarea required maxLength="1000" value={answers[q.id] || ''} onChange={e => setAnswers(v => ({...v,[q.id]:e.target.value}))} placeholder="Escribe tu mensaje…"/> : <div className="answer-options">{(q.options || []).map((op,i) => <label className={'answer-option ' + (answers[q.id] === op.label ? 'chosen' : '')} key={i}><input type="radio" name={q.id} checked={answers[q.id] === op.label} onChange={() => setAnswers(v => ({...v,[q.id]:op.label}))}/>{op.image_url && <img src={op.image_url} alt={op.label}/>}<span>{op.label}</span></label>)}</div>}</div>)}
+      {allowAnonymous && <label className="check-row"><input type="checkbox" checked={anonymous} onChange={e => setAnonymous(e.target.checked)}/> Enviar de forma anónima</label>}{(!allowAnonymous || !anonymous) && <label>Tu nombre<input required value={name} onChange={e => setName(e.target.value)} maxLength="60" placeholder="Cómo quieres aparecer"/></label>}<Notice error={error}/><Button disabled={busy}>{busy ? 'Enviando…' : 'Enviar respuesta ↗'}</Button><p className="tiny-note">No necesitas crear una cuenta para participar. Comparte solo información que te sientas cómodo enviando.</p></form>}
   </section><JoinCTA openAuth={openAuth}/></PublicShell>;
 }
 
