@@ -164,10 +164,20 @@ function Dashboard({ user, signOut }) {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [activity, setActivity] = useState([]);
+  const [myEntries, setMyEntries] = useState([]);
+  const [myEntriesLoading, setMyEntriesLoading] = useState(true);
+  const [entriesLoading, setEntriesLoading] = useState(false);
   const [editingExperience, setEditingExperience] = useState(null);
   async function load() {
-    setLoading(true); setError('');
-    let { data: p, error: pe } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
+    setLoading(true); setMyEntriesLoading(true); setError('');
+    const since = new Date(Date.now() - 30 * 86400000).toISOString();
+    const [profileResult, experienceResult, activityResult, historyResult] = await Promise.all([
+      supabase.from('profiles').select('id,username,display_name,bio,avatar_url,is_public').eq('id', user.id).maybeSingle(),
+      supabase.from('experiences').select('id,slug,kind,title,description,cover_url,is_public,status,settings,created_at,updated_at').eq('owner_id', user.id).order('created_at', { ascending: false }),
+      supabase.from('profile_activity').select('event_type,experience_id,created_at,visitor_key').eq('profile_id', user.id).gte('created_at', since).order('created_at', { ascending: false }).limit(250),
+      supabase.rpc('get_my_experience_entries')
+    ]);
+    let p = profileResult.data;
     if (!p) {
       const meta = user.user_metadata || {};
       const username = String(meta.username || '').toLowerCase();
@@ -175,25 +185,26 @@ function Dashboard({ user, signOut }) {
       if (/^[a-z0-9_]{3,24}$/.test(username) && display_name) {
         const { data: made, error: me } = await supabase.from('profiles').upsert({ id: user.id, username, display_name }).select().single();
         if (!me) p = made; else setError(me.message);
-      } else if (pe) setError(pe.message);
+      } else if (profileResult.error) setError(profileResult.error.message);
     }
-    const { data: ex, error: ee } = await supabase.from('experiences').select('*').eq('owner_id', user.id).order('created_at', { ascending: false });
-    const { data: act, error: ae } = await supabase.from('profile_activity')
-      .select('event_type,experience_id,created_at,visitor_key')
-      .eq('profile_id', user.id)
-      .gte('created_at', new Date(Date.now()-30*86400000).toISOString())
-      .order('created_at',{ascending:false}).limit(5000);
-    setProfile(p); setItems(ex || []); setActivity(act || []);
-    if (ee || ae) setError((ee || ae).message); setLoading(false);
+    setProfile(p);
+    setItems(experienceResult.data || []);
+    setActivity(activityResult.data || []);
+    setMyEntries(Array.isArray(historyResult.data) ? historyResult.data : []);
+    if (experienceResult.error || activityResult.error || historyResult.error) setError((experienceResult.error || activityResult.error || historyResult.error).message);
+    setLoading(false); setMyEntriesLoading(false);
   }
   useEffect(() => { load(); }, [user.id]);
   async function openEntries(item) {
-    setSelected(item); setSelectedEntryIds([]); setEntrySearch(''); setEntryFilter('all');
+    setSelected(item); setEntries([]); setSelectedQuestions([]); setEntriesLoading(true);
+    setSelectedEntryIds([]); setEntrySearch(''); setEntryFilter('all'); setError('');
     const [{ data, error: e }, { data: questions, error: qe }] = await Promise.all([
-      supabase.from('experience_entries').select('*').eq('experience_id', item.id).order('created_at', { ascending: false }).limit(200),
+      supabase.from('experience_entries').select('id,experience_id,respondent_id,respondent_name,is_anonymous,answers,created_at,read_at,is_favorite').eq('experience_id', item.id).order('created_at', { ascending: false }).limit(200),
       supabase.from('experience_questions').select('id,prompt,position').eq('experience_id', item.id).order('position')
     ]);
-    if (e || qe) setError((e || qe).message); else { setEntries(data || []); setSelectedQuestions(questions || []); }
+    if (e || qe) setError((e || qe).message);
+    else { setEntries(data || []); setSelectedQuestions(questions || []); }
+    setEntriesLoading(false);
   }
   async function removeSelectedEntries() {
     if (!selectedEntryIds.length || !confirm('¿Eliminar las respuestas seleccionadas? Esta acción no se puede deshacer.')) return;
@@ -272,16 +283,23 @@ function Dashboard({ user, signOut }) {
       {profile && <ProfileEditor profile={profile} user={user} onSaved={async p => { setProfile(p); setEditingProfile(false); setSuccess('Tu perfil se actualizó.'); }} editing={editingProfile} setEditing={setEditingProfile}/>}
       {!profile && !loading && <div className="panel"><h3>Completa tu perfil</h3><p className="subtle">No pudimos encontrar el perfil asociado a esta cuenta. Revisa el identificador y vuelve a intentarlo.</p><Button kind="soft" onClick={load}>Volver a cargar</Button></div>}
       {profile && <section className="activity-panel panel"><div className="dash-title"><div><div className="kicker">ÚLTIMOS 30 DÍAS</div><h2>Actividad de tu espacio</h2></div><span>Datos aproximados</span></div><div className="activity-stats"><article><small>Visitas al perfil</small><b>{activity.filter(x=>x.event_type==='profile_view').length}</b></article><article><small>Visitantes únicos estimados</small><b>{new Set(activity.filter(x=>x.event_type==='profile_view').map(x=>x.visitor_key)).size}</b></article><article><small>Juegos abiertos</small><b>{activity.filter(x=>x.event_type==='experience_view').length}</b></article><article><small>Respuestas enviadas</small><b>{activity.filter(x=>x.event_type==='experience_response').length}</b></article></div><div className="recent-activity">{activity.slice(0,6).map((a,i)=><div className="recent-activity-row" key={i}><span>{a.event_type==='profile_view'?'Visita al perfil':a.event_type==='experience_view'?'Abrió '+(items.find(x=>x.id===a.experience_id)?.title||'una experiencia'):'Nueva respuesta en '+(items.find(x=>x.id===a.experience_id)?.title||'una experiencia')}</span><time>{new Date(a.created_at).toLocaleString()}</time></div>)}</div><p className="tiny-note">Se cuentan visitantes únicos estimados por navegador y día. Las respuestas se cuentan por envío. No se recopilan direcciones IP ni se identifica personalmente a quien visita.</p></section>}
+      <section className="panel participant-history">
+        <div className="dash-title"><div><div className="kicker">TU ACTIVIDAD</div><h2>Mis participaciones</h2></div><span>{myEntries.length} guardadas</span></div>
+        {myEntriesLoading ? <p className="subtle">Cargando tus participaciones…</p> : myEntries.length ? <div className="participant-history-list">{myEntries.map(entry => <article className="participant-history-item" key={entry.id}>
+          <div className="participant-history-head"><div><b>{entry.experience_title || 'Experiencia'}</b><small>{entry.respondent_name || 'Tu respuesta'} · {new Date(entry.created_at).toLocaleString()}</small></div><a href={'#/e/' + entry.experience_slug}>Abrir ↗</a></div>
+          <div className="entry-answers">{(entry.answers || []).map(answer => <div className="entry-answer" key={answer.question_id}><small>{answer.prompt}</small><p>{answer.answer ?? '—'}</p></div>)}</div>
+        </article>)}</div> : <p className="subtle">Cuando participes en experiencias usando tu cuenta, tus respuestas aparecerán aquí.</p>}
+      </section>
       <div className="dash-title"><div><div className="kicker">TU CONTENIDO</div><h2>Tus experiencias</h2></div><span>{items.length} creadas</span></div>
       {loading ? <div className="panel">Cargando tus experiencias…</div> : items.length ? <div className="my-grid">{items.map(item => <article className="my-card" key={item.id}><div className="my-card-top"><span className={'kind-icon ' + item.kind}>{kinds.find(k => k.id === item.kind)?.icon}</span><span className={'status ' + item.status}>{item.status === 'published' ? 'Publicada' : item.status === 'paused' ? 'Pausada' : item.status === 'archived' ? 'Archivada' : 'Borrador'}</span></div><h3>{item.title}</h3><p>{item.description || kinds.find(k => k.id === item.kind)?.detail}</p><div className="game-metrics"><span>{activity.filter(x=>x.experience_id===item.id && x.event_type==='experience_view').length} aperturas</span><span>{activity.filter(x=>x.experience_id===item.id && x.event_type==='experience_response').length} respuestas</span><small>Últimos 30 días</small></div><div className="my-link">{publicUrl('e/' + item.slug)}</div><div className="my-card-actions"><button onClick={() => copyExperienceLink(item)}>Copiar enlace</button><button onClick={() => openEntries(item)}>Respuestas</button>{item.status === 'published' ? <button onClick={() => changeStatus(item,'paused')}>Pausar</button> : item.status === 'archived' ? null : <button onClick={() => changeStatus(item,'published')}>Publicar</button>}<button onClick={() => setEditingExperience(item)}>Editar</button><button onClick={() => duplicateExperience(item)}>Duplicar</button><button onClick={() => renameExperience(item)}>Título</button>{item.status !== 'archived' ? <button onClick={() => changeStatus(item,'archived')}>Archivar</button> : <button onClick={() => changeStatus(item,'draft')}>Restaurar</button>}<button className="danger-link" onClick={() => deleteExperience(item)}>Eliminar</button><a href={'#/e/' + item.slug} target="_blank" rel="noreferrer">Abrir ↗</a></div></article>)}</div> : <div className="empty panel"><span>✧</span><h3>Este espacio está esperando tu primera idea.</h3><p>Crea una experiencia y comparte el enlace con tus personas favoritas.</p><Button onClick={() => setShowCreator(true)}>Crear mi primera experiencia</Button></div>}
       {selected && <section className="panel responses">
         <div className="responses-head"><div><div className="kicker">BANDEJA DE RESPUESTAS</div><h2>{selected.title}</h2><p className="subtle">{entries.length} respuestas recibidas</p></div><button className="close-small" onClick={() => setSelected(null)}>Cerrar ×</button></div>
         <div className="inbox-tools"><input value={entrySearch} onChange={e => setEntrySearch(e.target.value)} placeholder="Buscar por nombre o contenido…"/><select className="entry-filter" value={entryFilter} onChange={e => setEntryFilter(e.target.value)}><option value="all">Todos los mensajes</option><option value="unread">No leídos</option><option value="favorites">Favoritos</option></select><div><button className="danger-link" disabled={!selectedEntryIds.length} onClick={removeSelectedEntries}>Eliminar seleccionadas ({selectedEntryIds.length})</button><button className="danger-link" disabled={!entries.length} onClick={clearEntries}>Vaciar bandeja</button></div></div>
-        {entries.length ? entries.filter(entry => ((entry.respondent_name || '').toLowerCase().includes(entrySearch.toLowerCase()) || JSON.stringify(entry.answers || {}).toLowerCase().includes(entrySearch.toLowerCase())) && (entryFilter==='all' || (entryFilter==='unread' && !entry.read_at) || (entryFilter==='favorites' && entry.is_favorite))).map(entry => <article className={'entry ' + (!entry.read_at ? 'entry-unread' : '')} key={entry.id}>
+        {entriesLoading ? <p className="subtle inbox-loading">Cargando respuestas…</p> : entries.length ? entries.filter(entry => ((entry.respondent_name || '').toLowerCase().includes(entrySearch.toLowerCase()) || JSON.stringify(entry.answers || {}).toLowerCase().includes(entrySearch.toLowerCase())) && (entryFilter==='all' || (entryFilter==='unread' && !entry.read_at) || (entryFilter==='favorites' && entry.is_favorite))).map(entry => <article className={'entry ' + (!entry.read_at ? 'entry-unread' : '')} key={entry.id}>
           <div className="entry-head"><label className="entry-select"><input type="checkbox" checked={selectedEntryIds.includes(entry.id)} onChange={e => setSelectedEntryIds(v => e.target.checked ? [...v,entry.id] : v.filter(x => x !== entry.id))}/><b>{entry.is_anonymous ? 'Anónimo' : entry.respondent_name || 'Participante'}</b>{!entry.read_at && <span className="entry-new">NUEVO</span>}</label><small>{new Date(entry.created_at).toLocaleString()}</small></div>
           <div className="entry-answers">{Object.entries(entry.answers || {}).map(([qid,answer]) => <div className="entry-answer" key={qid}><small>{selectedQuestions.find(q => q.id === qid)?.prompt || 'Respuesta'}</small><p>{Array.isArray(answer) ? answer.join(', ') : String(answer)}</p></div>)}</div>
           <div className="entry-actions"><button onClick={() => updateEntryMeta(entry,{read_at:entry.read_at ? null : new Date().toISOString()})}>{entry.read_at ? 'Marcar no leído' : 'Marcar leído'}</button><button onClick={() => updateEntryMeta(entry,{is_favorite:!entry.is_favorite})}>{entry.is_favorite ? '★ Quitar favorito' : '☆ Favorito'}</button><button className="danger-link" onClick={() => removeEntry(entry.id)}>Eliminar</button></div>
-        </article>) : <p className="subtle">Todavía no hay respuestas para esta experiencia.</p>}
+        </article>) : <p className="subtle">{entries.length ? 'No hay mensajes que coincidan con la búsqueda o el filtro.' : 'Todavía no hay respuestas para esta experiencia.'}</p>}
       </section>}
     </main>
     {showCreator && <Creator user={user} close={() => setShowCreator(false)} created={async () => { setShowCreator(false); setSuccess('Tu experiencia ya está creada.'); await load(); }}/>}\n    {editingExperience && <ExperienceEditor item={editingExperience} close={() => setEditingExperience(null)} saved={async () => {setEditingExperience(null);setSuccess('Experiencia actualizada.');await load();}}/>}
@@ -501,6 +519,7 @@ function PublicExperience({ slug, openAuth, user }) {
   const [success, setSuccess] = useState(false);
   const [score, setScore] = useState(null);
   const [leaderboard, setLeaderboard] = useState([]);
+  const [savedReceipt, setSavedReceipt] = useState(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [allowAnonymous, setAllowAnonymous] = useState(true);
   const quizMode = item?.kind === 'know_me';
@@ -522,6 +541,11 @@ function PublicExperience({ slug, openAuth, user }) {
         if (profileResult?.data?.display_name) setName(profileResult.data.display_name);
         setAllowAnonymous(ex.settings?.allow_anonymous !== false);
         setAnonymous(ex.settings?.allow_anonymous !== false);
+        const receiptToken = localStorage.getItem('interaccion:receipt:' + ex.id);
+        if (receiptToken) {
+          const { data: receipt } = await supabase.rpc('get_experience_entry_receipt', { p_receipt_token: receiptToken });
+          if (live && receipt) setSavedReceipt(receipt);
+        }
         trackActivity(ex.owner_id, ex.id, 'experience_view');
       }
     })();
@@ -547,13 +571,22 @@ function PublicExperience({ slug, openAuth, user }) {
       const isAnon = quizMode ? false : (allowAnonymous ? anonymous : false);
       const respondentName = quizMode && user ? signedInName : name.trim();
       if (!isAnon && !respondentName) throw new Error('Escribe el nombre que quieres mostrar.');
-      const { data: result, error: e1 } = await supabase.rpc('submit_experience_entry', {
+      const receiptToken = crypto.randomUUID() + crypto.randomUUID();
+      const { data: result, error: e1 } = await supabase.rpc('submit_experience_entry_with_receipt', {
         p_experience_id: item.id,
         p_respondent_name: isAnon ? null : respondentName,
         p_is_anonymous: isAnon,
-        p_answers: answers
+        p_answers: answers,
+        p_receipt_token: receiptToken
       });
       if (e1) throw e1;
+      localStorage.setItem('interaccion:receipt:' + item.id, receiptToken);
+      const { data: receipt } = await supabase.rpc('get_experience_entry_receipt', { p_receipt_token: receiptToken });
+      setSavedReceipt(receipt || {
+        experience_id: item.id, experience_title: item.title,
+        respondent_name: isAnon ? 'Anónimo' : respondentName, is_anonymous: isAnon,
+        answers: questions.map(q => ({question_id:q.id,prompt:q.prompt,answer:answers[q.id],position:q.position}))
+      });
       if (quizMode && result?.total) {
         setScore({ correct: Number(result.correct || 0), total: Number(result.total) });
         const { data: board, error: boardError } = await supabase.rpc('get_experience_leaderboard', { p_experience_id: item.id });
@@ -575,8 +608,14 @@ function PublicExperience({ slug, openAuth, user }) {
     <div className="kicker">{kinds.find(k => k.id === item.kind)?.short.toUpperCase()}</div>
     <h1>{item.title}</h1><p className="subtle">{item.description}</p>
     {owner && <a className="owner-link" href={'#/u/' + owner.username}>Creado por {owner.display_name} · @{owner.username}</a>}
+    {savedReceipt && !success && <section className="receipt-panel">
+      <div className="receipt-panel-head"><div><div className="kicker">COMPROBANTE PERSONAL</div><b>Ya participaste en esta experiencia</b></div><button type="button" onClick={() => setSavedReceipt(null)}>Ocultar</button></div>
+      <div className="entry-answers">{(savedReceipt.answers || []).map(answer => <div className="entry-answer" key={answer.question_id}><small>{answer.prompt}</small><p>{answer.answer ?? '—'}</p></div>)}</div>
+      <p className="tiny-note">Este comprobante se guarda en este navegador. Si borras sus datos o cambias de dispositivo, no estará disponible.</p>
+    </section>}
     {success ? <div className="success-screen">
-      <span>✓</span><h2>¡Terminaste el reto!</h2><p>Tu participación quedó guardada.</p>
+      <span>✓</span><h2>¡Participación guardada!</h2><p>Estas son las respuestas que enviaste. Puedes volver a consultarlas en este navegador.</p>
+      {savedReceipt && <section className="receipt-panel receipt-confirmation"><div className="kicker">TUS RESPUESTAS</div><div className="entry-answers">{(savedReceipt.answers || []).map(answer => <div className="entry-answer" key={answer.question_id}><small>{answer.prompt}</small><p>{answer.answer ?? '—'}</p></div>)}</div></section>}
       {score && <div className="quiz-result">
         <div className="quiz-score"><b>{Math.round(score.correct * 100 / Math.max(1, score.total))}%</b><small>{score.correct} de {score.total} respuestas correctas</small><p>{score.correct === score.total ? '¡Perfecto! Conoces muy bien a esta persona.' : score.correct >= Math.ceil(score.total/2) ? '¡Muy bien! Has acertado varias.' : '¡Ya conoces un poco más sobre esta persona!'}</p></div>
         <section className="leaderboard-panel">
