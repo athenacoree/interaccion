@@ -257,6 +257,7 @@ function ProfileEditor({ profile, user, editing, setEditing, onSaved }) {
   const [name, setName] = useState(profile.display_name || '');
   const [bio, setBio] = useState(profile.bio || '');
   const [avatar, setAvatar] = useState(profile.avatar_url || '');
+  const [isPublic, setIsPublic] = useState(profile.is_public !== false);
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -264,12 +265,12 @@ function ProfileEditor({ profile, user, editing, setEditing, onSaved }) {
     e.preventDefault(); setBusy(true); setError('');
     try {
       const url = file ? await uploadImage(file, user.id) : avatar;
-      const { data, error: e1 } = await supabase.from('profiles').update({ display_name: name.trim(), bio: bio.trim(), avatar_url: url || null }).eq('id', user.id).select().single();
+      const { data, error: e1 } = await supabase.from('profiles').update({ display_name: name.trim(), bio: bio.trim(), avatar_url: url || null, is_public: isPublic }).eq('id', user.id).select().single();
       if (e1) throw e1; onSaved(data);
     } catch (e1) { setError(e1.message); } finally { setBusy(false); }
   }
   return <section className="profile-panel panel"><div className="profile-summary">{avatar ? <img src={avatar} alt="Foto de perfil"/> : <div className="avatar-placeholder">{(profile.display_name || 'I').slice(0,1).toUpperCase()}</div>}<div><b>{profile.display_name}</b><span>@{profile.username}</span><small>{profile.bio || 'Añade una pequeña descripción a tu perfil.'}</small></div><Button kind="soft" onClick={() => setEditing(!editing)}>{editing ? 'Cancelar' : 'Editar perfil'}</Button></div>
-    {editing && <form className="profile-form" onSubmit={save}><label>Nombre visible<input value={name} onChange={e => setName(e.target.value)} maxLength="60" required/></label><label>Descripción<textarea value={bio} onChange={e => setBio(e.target.value)} maxLength="180" placeholder="Cuéntales algo sobre ti…"/></label><label>Foto de perfil<input type="file" accept="image/png,image/jpeg,image/webp,image/avif" onChange={e => setFile(e.target.files?.[0] || null)}/></label>{error && <Notice error={error}/>}<Button disabled={busy}>{busy ? 'Guardando…' : 'Guardar cambios'}</Button></form>}
+    {editing && <form className="profile-form" onSubmit={save}><label>Nombre visible<input value={name} onChange={e => setName(e.target.value)} maxLength="60" required/></label><label>Descripción<textarea value={bio} onChange={e => setBio(e.target.value)} maxLength="180" placeholder="Cuéntales algo sobre ti…"/></label><label>Foto de perfil<input type="file" accept="image/png,image/jpeg,image/webp,image/avif" onChange={e => setFile(e.target.files?.[0] || null)}/></label><label className="check-row"><input type="checkbox" checked={isPublic} onChange={e => setIsPublic(e.target.checked)}/> Mi perfil es público</label>{error && <Notice error={error}/>} <Button disabled={busy}>{busy ? 'Guardando…' : 'Guardar cambios'}</Button></form>}
   </section>;
 }
 
