@@ -100,9 +100,25 @@ function App() {
     const change = () => setPage(route());
     window.addEventListener('hashchange', change);
     if (!supabase) { setReady(true); return () => window.removeEventListener('hashchange', change); }
-    supabase.auth.getSession().then(({ data }) => { setUser(data.session?.user || null); setReady(true); });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => setUser(session?.user || null));
-    return () => { window.removeEventListener('hashchange', change); listener.subscription.unsubscribe(); };
+    let active = true;
+    supabase.auth.getSession()
+      .then(({ data, error }) => {
+        if (error) console.warn('No se pudo recuperar la sesión:', error.message);
+        if (active) setUser(data?.session?.user || null);
+      })
+      .catch(error => {
+        console.warn('La sesión no está disponible; se mostrará la página pública:', error);
+        if (active) setUser(null);
+      })
+      .finally(() => { if (active) setReady(true); });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (active) setUser(session?.user || null);
+    });
+    return () => {
+      active = false;
+      window.removeEventListener('hashchange', change);
+      listener.subscription.unsubscribe();
+    };
   }, []);
   async function signOut() { await supabase?.auth.signOut(); setUser(null); location.hash = ''; }
   if (!ready) return <div className="boot"><span className="brand-icon">i</span><p>Preparando tu espacio…</p></div>;
