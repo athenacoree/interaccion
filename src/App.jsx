@@ -124,6 +124,9 @@ function Dashboard({ user, signOut }) {
   const [showCreator, setShowCreator] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
   const [entries, setEntries] = useState([]);
+  const [selectedQuestions, setSelectedQuestions] = useState([]);
+  const [selectedEntryIds, setSelectedEntryIds] = useState([]);
+  const [entrySearch, setEntrySearch] = useState('');
   const [selected, setSelected] = useState(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -144,14 +147,27 @@ function Dashboard({ user, signOut }) {
   }
   useEffect(() => { load(); }, [user.id]);
   async function openEntries(item) {
-    setSelected(item);
-    const { data, error: e } = await supabase.from('experience_entries').select('*').eq('experience_id', item.id).order('created_at', { ascending: false }).limit(100);
-    if (e) setError(e.message); else setEntries(data || []);
+    setSelected(item); setSelectedEntryIds([]); setEntrySearch('');
+    const [{ data, error: e }, { data: questions, error: qe }] = await Promise.all([
+      supabase.from('experience_entries').select('*').eq('experience_id', item.id).order('created_at', { ascending: false }).limit(200),
+      supabase.from('experience_questions').select('id,prompt,position').eq('experience_id', item.id).order('position')
+    ]);
+    if (e || qe) setError((e || qe).message); else { setEntries(data || []); setSelectedQuestions(questions || []); }
+  }
+  async function removeSelectedEntries() {
+    if (!selectedEntryIds.length || !confirm('¿Eliminar las respuestas seleccionadas? Esta acción no se puede deshacer.')) return;
+    const { error: e } = await supabase.from('experience_entries').delete().in('id', selectedEntryIds);
+    if (e) setError(e.message); else { setEntries(v => v.filter(x => !selectedEntryIds.includes(x.id))); setSelectedEntryIds([]); setSuccess('Respuestas eliminadas.'); }
+  }
+  async function clearEntries() {
+    if (!selected || !entries.length || !confirm('¿Vaciar todas las respuestas de este juego? Esta acción no se puede deshacer.')) return;
+    const { error: e } = await supabase.from('experience_entries').delete().eq('experience_id', selected.id);
+    if (e) setError(e.message); else { setEntries([]); setSelectedEntryIds([]); setSuccess('La bandeja quedó vacía.'); }
   }
   async function removeEntry(id) {
     if (!confirm('¿Eliminar esta respuesta?')) return;
     const { error: e } = await supabase.from('experience_entries').delete().eq('id', id);
-    if (e) setError(e.message); else { setEntries(v => v.filter(x => x.id !== id)); setSuccess('Respuesta eliminada.'); }
+    if (e) setError(e.message); else { setEntries(v => v.filter(x => x.id !== id)); setSelectedEntryIds(v => v.filter(x => x !== id)); setSuccess('Respuesta eliminada.'); }
   }
   return <div className="dashboard">
     <header className="dashbar wrap"><Brand/><div className="dash-actions"><a href={profile?.username ? publicUrl('u/' + profile.username) : '#'} target="_blank" rel="noreferrer">Ver mi perfil ↗</a><Button kind="soft" onClick={signOut}>Salir</Button></div></header>
@@ -161,7 +177,15 @@ function Dashboard({ user, signOut }) {
       {!profile && !loading && <div className="panel"><h3>Completa tu perfil</h3><p className="subtle">No pudimos encontrar el perfil asociado a esta cuenta. Revisa el identificador y vuelve a intentarlo.</p><Button kind="soft" onClick={load}>Volver a cargar</Button></div>}
       <div className="dash-title"><div><div className="kicker">TU CONTENIDO</div><h2>Tus experiencias</h2></div><span>{items.length} creadas</span></div>
       {loading ? <div className="panel">Cargando tus experiencias…</div> : items.length ? <div className="my-grid">{items.map(item => <article className="my-card" key={item.id}><div className="my-card-top"><span className={'kind-icon ' + item.kind}>{kinds.find(k => k.id === item.kind)?.icon}</span><span className={'status ' + item.status}>{item.status === 'published' ? 'Publicada' : 'Borrador'}</span></div><h3>{item.title}</h3><p>{item.description || kinds.find(k => k.id === item.kind)?.detail}</p><div className="my-link">{publicUrl('e/' + item.slug)}</div><div className="my-card-actions"><button onClick={() => openEntries(item)}>Ver respuestas</button><a href={'#/e/' + item.slug} target="_blank" rel="noreferrer">Abrir ↗</a></div></article>)}</div> : <div className="empty panel"><span>✧</span><h3>Este espacio está esperando tu primera idea.</h3><p>Crea una experiencia y comparte el enlace con tus personas favoritas.</p><Button onClick={() => setShowCreator(true)}>Crear mi primera experiencia</Button></div>}
-      {selected && <section className="panel responses"><div className="responses-head"><div><div className="kicker">RESPUESTAS RECIBIDAS</div><h2>{selected.title}</h2></div><button className="close-small" onClick={() => setSelected(null)}>Cerrar ×</button></div>{entries.length ? entries.map(entry => <article className="entry" key={entry.id}><div><b>{entry.is_anonymous ? 'Anónimo' : entry.respondent_name || 'Participante'}</b><small>{new Date(entry.created_at).toLocaleString()}</small></div><pre>{JSON.stringify(entry.answers, null, 2)}</pre><button className="danger-link" onClick={() => removeEntry(entry.id)}>Eliminar respuesta</button></article>) : <p className="subtle">Todavía no hay respuestas para esta experiencia.</p>}</section>}
+      {selected && <section className="panel responses">
+        <div className="responses-head"><div><div className="kicker">BANDEJA DE RESPUESTAS</div><h2>{selected.title}</h2><p className="subtle">{entries.length} respuestas recibidas</p></div><button className="close-small" onClick={() => setSelected(null)}>Cerrar ×</button></div>
+        <div className="inbox-tools"><input value={entrySearch} onChange={e => setEntrySearch(e.target.value)} placeholder="Buscar por nombre o contenido…"/><div><button className="danger-link" disabled={!selectedEntryIds.length} onClick={removeSelectedEntries}>Eliminar seleccionadas ({selectedEntryIds.length})</button><button className="danger-link" disabled={!entries.length} onClick={clearEntries}>Vaciar bandeja</button></div></div>
+        {entries.length ? entries.filter(entry => (entry.respondent_name || '').toLowerCase().includes(entrySearch.toLowerCase()) || JSON.stringify(entry.answers || {}).toLowerCase().includes(entrySearch.toLowerCase())).map(entry => <article className="entry" key={entry.id}>
+          <div className="entry-head"><label className="entry-select"><input type="checkbox" checked={selectedEntryIds.includes(entry.id)} onChange={e => setSelectedEntryIds(v => e.target.checked ? [...v,entry.id] : v.filter(x => x !== entry.id))}/><b>{entry.is_anonymous ? 'Anónimo' : entry.respondent_name || 'Participante'}</b></label><small>{new Date(entry.created_at).toLocaleString()}</small></div>
+          <div className="entry-answers">{Object.entries(entry.answers || {}).map(([qid,answer]) => <div className="entry-answer" key={qid}><small>{selectedQuestions.find(q => q.id === qid)?.prompt || 'Respuesta'}</small><p>{Array.isArray(answer) ? answer.join(', ') : String(answer)}</p></div>)}</div>
+          <button className="danger-link" onClick={() => removeEntry(entry.id)}>Eliminar respuesta</button>
+        </article>) : <p className="subtle">Todavía no hay respuestas para esta experiencia.</p>}
+      </section>}
     </main>
     {showCreator && <Creator user={user} close={() => setShowCreator(false)} created={async () => { setShowCreator(false); setSuccess('Tu experiencia ya está creada.'); await load(); }}/>}
   </div>;
