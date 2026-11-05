@@ -18,6 +18,22 @@ const route = () => {
   return { type: type || 'home', value: parts.join('/') };
 };
 const publicUrl = (path) => location.origin + location.pathname + '#/' + path;
+const trackActivity = async (profileId, experienceId, eventType) => {
+  if (!supabase || !profileId || typeof window === 'undefined') return;
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const target = eventType === 'profile_view' ? profileId : experienceId;
+    const storageKey = 'interaccion:activity:' + eventType + ':' + target + ':' + today;
+    let visitorKey = localStorage.getItem('interaccion:visitor');
+    if (!visitorKey) { visitorKey = crypto.randomUUID(); localStorage.setItem('interaccion:visitor', visitorKey); }
+    if (localStorage.getItem(storageKey)) return;
+    const { error } = await supabase.from('profile_activity').insert({
+      profile_id: profileId, experience_id: experienceId, visitor_key: visitorKey,
+      event_type: eventType, visit_day: today
+    });
+    if (!error || error.code === '23505') localStorage.setItem(storageKey, '1');
+  } catch { /* Analytics never blocks access to public content. */ }
+};
 const uploadImage = async (file, userId) => {
   if (!file || !supabase) return null;
   if (!['image/jpeg', 'image/png', 'image/webp', 'image/avif'].includes(file.type)) throw new Error('Usa una imagen JPG, PNG, WebP o AVIF.');
@@ -106,8 +122,8 @@ function App() {
   }, []);
   async function signOut() { await supabase?.auth.signOut(); setUser(null); location.hash = ''; }
   if (!ready) return <div className="boot"><span className="brand-icon">i</span><p>Preparando tu espacio…</p></div>;
-  if (page.type === 'u' && page.value) return <PublicProfile username={page.value} openAuth={() => setAuthOpen(true)} />;
-  if (page.type === 'e' && page.value) return <PublicExperience slug={page.value} openAuth={() => setAuthOpen(true)} />;
+  if (page.type === 'u' && page.value) return <><PublicProfile username={page.value} openAuth={() => setAuthOpen(true)} />{authOpen && <AuthDialog close={() => setAuthOpen(false)} done={u => { setUser(u); setAuthOpen(false); location.hash = ''; }}/>}</>;
+  if (page.type === 'e' && page.value) return <><PublicExperience slug={page.value} openAuth={() => setAuthOpen(true)} />{authOpen && <AuthDialog close={() => setAuthOpen(false)} done={u => { setUser(u); setAuthOpen(false); location.hash = ''; }}/>}</>;
   if (user) return <Dashboard user={user} signOut={signOut} />;
   return <Landing openAuth={() => setAuthOpen(true)} authOpen={authOpen} closeAuth={() => setAuthOpen(false)} onSignedIn={u => { setUser(u); setAuthOpen(false); }} />;
 }
@@ -160,11 +176,12 @@ function Dashboard({ user, signOut }) {
         if (!me) p = made; else setError(me.message);
       } else if (pe) setError(pe.message);
     }
-    const [{ data: ex, error: ee }, { data: act, error: ae }] = await Promise.all([
-      supabase.from('experiences').select('*').eq('owner_id', user.id).order('created_at', { ascending: false }),
-      supabase.from('profile_activity').select('event_type,experience_id,created_at').eq('profile_id', user.id).gte('created_at', new Date(Date.now()-30*86400000).toISOString()).order('created_at',{ascending:false}).limit(5000)
+    const { data: ex, error: ee } = await supabase.from('experiences').select('*').eq('owner_id', user.id).order('created_at', { ascending: false });
+    const [{ data: act, error: ae }, { data: responses, error: re }] = await Promise.all([
+      supabase.from('profile_activity').select('event_type,experience_id,created_at,visitor_key').eq('profile_id', user.id).gte('created_at', new Date(Date.now()-30*86400000).toISOString()).order('created_at',{ascending:false}).limit(5000),
+      ex?.length ? supabase.from('experience_entries').select('id,experience_id,created_at').in('experience_id', ex.map(x=>x.id)).gte('created_at',new Date(Date.now()-30*86400000).toISOString()).limit(5000) : Promise.resolve({data:[],error:null})
     ]);
-    setProfile(p); setItems(ex || []); setActivity(act || []); if (ee || ae) setError((ee || ae).message); setLoading(false);
+    setProfile(p); setItems((ex || []).map(x=>({...x, recent_entry_count:(responses||[]).filter(r=>r.experience_id===x.id).length}))); setActivity([...(act || []),...(responses || []).map(r=>({event_type:'experience_response',experience_id:r.experience_id,created_at:r.created_at}))].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))); if (ee || ae || re) setError((ee || ae || re).message); setLoading(false);
   }
   useEffect(() => { load(); }, [user.id]);
   async function openEntries(item) {
@@ -187,7 +204,7 @@ function Dashboard({ user, signOut }) {
   }
   async function changeStatus(item, status) {
     const { error: e } = await supabase.from('experiences').update({ status, updated_at: new Date().toISOString() }).eq('id', item.id).eq('owner_id', user.id);
-    if (e) setError(e.message); else { setSuccess(status === 'published' ? 'Experiencia publicada.' : status === 'paused' ? 'Experiencia pausada.' : 'Estado actualizado.'); await load(); }
+    if (e) setError(e.message); else { setSuccess(status === 'published' ? 'Experiencia publicada.' : status === 'archived' ? 'Experiencia pausada.' : 'Estado actualizado.'); await load(); }
   }
   async function deleteExperience(item) {
     if (!confirm('¿Eliminar «' + item.title + '» y todas sus respuestas? No se puede deshacer.')) return;
@@ -230,7 +247,7 @@ function Dashboard({ user, signOut }) {
       {!profile && !loading && <div className="panel"><h3>Completa tu perfil</h3><p className="subtle">No pudimos encontrar el perfil asociado a esta cuenta. Revisa el identificador y vuelve a intentarlo.</p><Button kind="soft" onClick={load}>Volver a cargar</Button></div>}
       {profile && <section className="activity-panel panel"><div className="dash-title"><div><div className="kicker">ÚLTIMOS 30 DÍAS</div><h2>Actividad de tu espacio</h2></div><span>Datos aproximados</span></div><div className="activity-stats"><article><small>Visitas al perfil</small><b>{activity.filter(x=>x.event_type==='profile_view').length}</b></article><article><small>Juegos abiertos</small><b>{activity.filter(x=>x.event_type==='experience_view').length}</b></article><article><small>Respuestas enviadas</small><b>{activity.filter(x=>x.event_type==='experience_response').length}</b></article></div><p className="tiny-note">Se cuentan visitantes únicos estimados por navegador y día. No se recopilan direcciones IP ni se identifica personalmente a quien visita.</p></section>}
       <div className="dash-title"><div><div className="kicker">TU CONTENIDO</div><h2>Tus experiencias</h2></div><span>{items.length} creadas</span></div>
-      {loading ? <div className="panel">Cargando tus experiencias…</div> : items.length ? <div className="my-grid">{items.map(item => <article className="my-card" key={item.id}><div className="my-card-top"><span className={'kind-icon ' + item.kind}>{kinds.find(k => k.id === item.kind)?.icon}</span><span className={'status ' + item.status}>{item.status === 'published' ? 'Publicada' : item.status === 'paused' ? 'Pausada' : item.status === 'archived' ? 'Archivada' : 'Borrador'}</span></div><h3>{item.title}</h3><p>{item.description || kinds.find(k => k.id === item.kind)?.detail}</p><div className="my-link">{publicUrl('e/' + item.slug)}</div><div className="my-card-actions"><button onClick={() => openEntries(item)}>Respuestas</button>{item.status === 'published' ? <button onClick={() => changeStatus(item,'paused')}>Pausar</button> : <button onClick={() => changeStatus(item,'published')}>Publicar</button>}<button onClick={() => setEditingExperience(item)}>Editar</button><button onClick={() => duplicateExperience(item)}>Duplicar</button><button onClick={() => renameExperience(item)}>Título</button>{item.status !== 'archived' ? <button onClick={() => changeStatus(item,'archived')}>Archivar</button> : <button onClick={() => changeStatus(item,'draft')}>Restaurar</button>}<button className="danger-link" onClick={() => deleteExperience(item)}>Eliminar</button><a href={'#/e/' + item.slug} target="_blank" rel="noreferrer">Abrir ↗</a></div></article>)}</div> : <div className="empty panel"><span>✧</span><h3>Este espacio está esperando tu primera idea.</h3><p>Crea una experiencia y comparte el enlace con tus personas favoritas.</p><Button onClick={() => setShowCreator(true)}>Crear mi primera experiencia</Button></div>}
+      {loading ? <div className="panel">Cargando tus experiencias…</div> : items.length ? <div className="my-grid">{items.map(item => <article className="my-card" key={item.id}><div className="my-card-top"><span className={'kind-icon ' + item.kind}>{kinds.find(k => k.id === item.kind)?.icon}</span><span className={'status ' + item.status}>{item.status === 'published' ? 'Publicada' : item.status === 'archived' ? 'Pausada' : item.status === 'paused' ? 'Estado no compatible' : 'Archivada' : 'Borrador'}</span></div><h3>{item.title}</h3><p>{item.description || kinds.find(k => k.id === item.kind)?.detail}</p><div className="my-link">{publicUrl('e/' + item.slug)}</div><div className="my-card-actions"><button onClick={() => openEntries(item)}>Respuestas</button>{item.status === 'published' ? <button onClick={() => changeStatus(item,'archived')}>Pausar</button> : <button onClick={() => changeStatus(item,'published')}>Publicar</button>}<button onClick={() => setEditingExperience(item)}>Editar</button><button onClick={() => duplicateExperience(item)}>Duplicar</button><button onClick={() => renameExperience(item)}>Título</button>{item.status !== 'archived' ? <button onClick={() => changeStatus(item,'archived')}>Archivar</button> : <button onClick={() => changeStatus(item,'draft')}>Restaurar</button>}<button className="danger-link" onClick={() => deleteExperience(item)}>Eliminar</button><a href={'#/e/' + item.slug} target="_blank" rel="noreferrer">Abrir ↗</a></div></article>)}</div> : <div className="empty panel"><span>✧</span><h3>Este espacio está esperando tu primera idea.</h3><p>Crea una experiencia y comparte el enlace con tus personas favoritas.</p><Button onClick={() => setShowCreator(true)}>Crear mi primera experiencia</Button></div>}
       {selected && <section className="panel responses">
         <div className="responses-head"><div><div className="kicker">BANDEJA DE RESPUESTAS</div><h2>{selected.title}</h2><p className="subtle">{entries.length} respuestas recibidas</p></div><button className="close-small" onClick={() => setSelected(null)}>Cerrar ×</button></div>
         <div className="inbox-tools"><input value={entrySearch} onChange={e => setEntrySearch(e.target.value)} placeholder="Buscar por nombre o contenido…"/><div><button className="danger-link" disabled={!selectedEntryIds.length} onClick={removeSelectedEntries}>Eliminar seleccionadas ({selectedEntryIds.length})</button><button className="danger-link" disabled={!entries.length} onClick={clearEntries}>Vaciar bandeja</button></div></div>
