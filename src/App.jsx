@@ -101,6 +101,11 @@ function App() {
     window.addEventListener('hashchange', change);
     if (!supabase) { setReady(true); return () => window.removeEventListener('hashchange', change); }
     let active = true;
+    // No bloquees toda la web si la conexión de autenticación tarda demasiado.
+    // La parte pública puede mostrarse aunque Supabase esté temporalmente lento.
+    const authFallbackTimer = window.setTimeout(() => {
+      if (active) setReady(true);
+    }, 8000);
     supabase.auth.getSession()
       .then(({ data, error }) => {
         if (error) console.warn('No se pudo recuperar la sesión:', error.message);
@@ -110,7 +115,10 @@ function App() {
         console.warn('La sesión no está disponible; se mostrará la página pública:', error);
         if (active) setUser(null);
       })
-      .finally(() => { if (active) setReady(true); });
+      .finally(() => {
+        window.clearTimeout(authFallbackTimer);
+        if (active) setReady(true);
+      });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (active) setUser(session?.user || null);
     });
