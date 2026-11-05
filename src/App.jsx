@@ -206,7 +206,18 @@ function Dashboard({ user, signOut }) {
       supabase.from('experience_questions').select('id,prompt,position').eq('experience_id', item.id).order('position')
     ]);
     if (e || qe) setError((e || qe).message);
-    else { setEntries(data || []); setSelectedQuestions(questions || []); }
+    else {
+      const rows = data || [];
+      const unreadIds = rows.filter(row => !row.read_at).map(row => row.id);
+      const readAt = new Date().toISOString();
+      if (unreadIds.length) {
+        const { error: readError } = await supabase.from('experience_entries').update({ read_at: readAt }).in('id', unreadIds);
+        if (readError) setError(readError.message);
+      }
+      setEntries(rows.map(row => row.read_at ? row : { ...row, read_at: readAt }));
+      setSelectedQuestions(questions || []);
+      setInboxSummary(current => current.map(row => row.id === item.id ? { ...row, unread: 0 } : row));
+    }
     setEntriesLoading(false);
   }
   async function removeSelectedEntries() {
@@ -296,7 +307,7 @@ function Dashboard({ user, signOut }) {
       </section>
       {profile && <section className="activity-panel panel"><div className="dash-title"><div><div className="kicker">ÚLTIMOS 30 DÍAS</div><h2>Actividad de tu espacio</h2></div><span>Datos aproximados</span></div><div className="activity-stats"><article><small>Visitas al perfil</small><b>{activity.filter(x=>x.event_type==='profile_view').length}</b></article><article><small>Visitantes únicos estimados</small><b>{new Set(activity.filter(x=>x.event_type==='profile_view').map(x=>x.visitor_key)).size}</b></article><article><small>Juegos abiertos</small><b>{activity.filter(x=>x.event_type==='experience_view').length}</b></article><article><small>Respuestas enviadas</small><b>{activity.filter(x=>x.event_type==='experience_response').length}</b></article></div><div className="recent-activity">{activity.slice(0,6).map((a,i)=><div className="recent-activity-row" key={i}><span>{a.event_type==='profile_view'?'Visita al perfil':a.event_type==='experience_view'?'Abrió '+(items.find(x=>x.id===a.experience_id)?.title||'una experiencia'):'Nueva respuesta en '+(items.find(x=>x.id===a.experience_id)?.title||'una experiencia')}</span><time>{new Date(a.created_at).toLocaleString()}</time></div>)}</div><p className="tiny-note">Se cuentan visitantes únicos estimados por navegador y día. Las respuestas se cuentan por envío. No se recopilan direcciones IP ni se identifica personalmente a quien visita.</p></section>}
       <section className="panel participant-history">
-        <div className="dash-title"><div><div className="kicker">TU ACTIVIDAD</div><h2>Mis participaciones</h2></div><span>{myEntries.length} guardadas</span></div>
+        <div className="dash-title"><div><div className="kicker">TU ACTIVIDAD</div><h2>Mis interacciones</h2></div><span>{myEntries.length} guardadas</span></div>
         {myEntriesLoading ? <p className="subtle">Cargando tus participaciones…</p> : myEntries.length ? <div className="participant-history-list">{myEntries.map(entry => <article className="participant-history-item" key={entry.id}>
           <div className="participant-history-head"><div><b>{entry.experience_title || 'Experiencia'}</b><small>{entry.respondent_name || 'Tu respuesta'} · {new Date(entry.created_at).toLocaleString()}</small></div><a href={'#/e/' + entry.experience_slug}>Abrir ↗</a></div>
           <div className="entry-answers">{(entry.answers || []).map(answer => <div className="entry-answer" key={answer.question_id}><small>{answer.prompt}</small><p>{answer.answer ?? '—'}</p></div>)}</div>
