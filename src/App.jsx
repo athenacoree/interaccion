@@ -291,6 +291,7 @@ function Creator({ user, close, created }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [prompts, setPrompts] = useState(['']);
+  const [correctAnswers, setCorrectAnswers] = useState([0]);
   const [options, setOptions] = useState(['Opción 1', 'Opción 2']);
   const [imageFiles, setImageFiles] = useState([null, null]);
   const [anonymous, setAnonymous] = useState(true);
@@ -302,15 +303,15 @@ function Creator({ user, close, created }) {
 
   function chooseKind(id) {
     setKind(id); setTemplate(-1); setTitle(''); setDescription('');
-    setPrompts(['']); setOptions(['Opción 1', 'Opción 2']); setImageFiles([null, null]);
+    setPrompts(['']); setCorrectAnswers([0]); setOptions(['Opción 1', 'Opción 2']); setImageFiles([null, null]);
     setStep(2); setError('');
   }
   function chooseTemplate(index) {
     setTemplate(index);
-    if (index === -1) { setTitle(''); setPrompts(['']); }
+    if (index === -1) { setTitle(''); setPrompts(['']); setCorrectAnswers([0]); }
     else {
       const preset = creatorTemplates[kind][index];
-      setTitle(preset.title); setPrompts(preset.prompts);
+      setTitle(preset.title); setPrompts(preset.prompts); setCorrectAnswers(preset.prompts.map(()=>0));
     }
     setStep(3);
   }
@@ -322,7 +323,7 @@ function Creator({ user, close, created }) {
       const cleanPrompts = prompts.map(x => x.trim()).filter(Boolean);
       if (!cleanPrompts.length) throw new Error('Añade al menos una pregunta.');
       if (kind === 'comparison' && imageFiles.filter(Boolean).length < 2) throw new Error('Añade las dos imágenes para crear la comparativa.');
-      if (needsOptions && options.filter(x => x.trim()).length < 2) throw new Error('Añade al menos dos opciones.');
+      if (needsOptions && (options.filter(x => x.trim()).length < 2 || options.some(x => !x.trim()))) throw new Error('Completa todas las opciones y añade al menos dos.');
       const slug = makeSlug(cleanTitle) + '-' + crypto.randomUUID().slice(0, 6);
       const { data: ex, error: ee } = await supabase.from('experiences').insert({
         owner_id: user.id, slug, kind, title: cleanTitle, description: description.trim(),
@@ -341,7 +342,7 @@ function Creator({ user, close, created }) {
       const questionRows = cleanPrompts.map((prompt, position) => ({
         experience_id: ex.id, position, prompt,
         answer_type: kind === 'confession' ? 'text' : kind === 'comparison' ? 'image_choice' : 'single_choice',
-        options: questionOptions, media: []
+        options: questionOptions, media: kind === 'know_me' ? { correct_option_index: Number(correctAnswers[position] || 0) } : []
       }));
       const { error: qe } = await supabase.from('experience_questions').insert(questionRows);
       if (qe) throw qe;
@@ -369,8 +370,9 @@ function Creator({ user, close, created }) {
         <label>Título del juego<input required maxLength="90" value={title} onChange={e => setTitle(e.target.value)} placeholder={kind === 'comparison' ? 'Ej. ¿Quién es más lindo?' : kind === 'confession' ? 'Ej. Déjame una confesión' : 'Ej. ¿Qué tanto me conoces?'}/></label>
         <label>Descripción<textarea maxLength="240" value={description} onChange={e => setDescription(e.target.value)} placeholder="Explica brevemente de qué trata…"/></label>
         <div className="field-group"><span className="field-title">{kind === 'confession' ? 'Mensaje que verá quien participe' : kind === 'comparison' ? 'Pregunta para votar' : 'Preguntas del juego'}</span>
-          {prompts.map((value,index) => <div className="question-edit" key={index}><input required maxLength="180" value={value} onChange={e => setPrompts(v => v.map((x,i) => i === index ? e.target.value : x))} placeholder={kind === 'confession' ? 'Escribe aquí lo que quieras compartir…' : kind === 'comparison' ? 'Ej. ¿Cuál de estas opciones prefieres?' : 'Pregunta ' + (index+1)}/>{prompts.length > 1 && kind === 'know_me' && <button type="button" className="remove-question" onClick={() => setPrompts(v => v.filter((_,i) => i !== index))}>Quitar</button>}</div>)}
-          {kind === 'know_me' && prompts.length < 15 && <button type="button" className="add-option" onClick={() => setPrompts(v => [...v,''])}>＋ Añadir pregunta</button>}
+          {prompts.map((value,index) => <div className="question-edit" key={index}><input required maxLength="180" value={value} onChange={e => setPrompts(v => v.map((x,i) => i === index ? e.target.value : x))} placeholder={kind === 'confession' ? 'Escribe aquí lo que quieras compartir…' : kind === 'comparison' ? 'Ej. ¿Cuál de estas opciones prefieres?' : 'Pregunta ' + (index+1)}/>{prompts.length > 1 && kind === 'know_me' && <button type="button" className="remove-question" onClick={() => {setPrompts(v => v.filter((_,i) => i !== index));setCorrectAnswers(v => v.filter((_,i) => i !== index));}}>Quitar</button>}</div>)}
+          {kind === 'know_me' && prompts.map((prompt,index) => <label className="correct-answer-select" key={'correct-'+index}>Respuesta correcta · Pregunta {index+1}<select value={correctAnswers[index] ?? 0} onChange={e => setCorrectAnswers(v => v.map((x,i) => i === index ? Number(e.target.value) : x))}>{options.map((option,i) => <option key={i} value={i}>{option || 'Opción '+(i+1)}</option>)}</select></label>)}
+          {kind === 'know_me' && prompts.length < 15 && <button type="button" className="add-option" onClick={() => {setPrompts(v => [...v,'']);setCorrectAnswers(v => [...v,0]);}}>＋ Añadir pregunta</button>}
         </div>
         {needsOptions && <div className="options-editor"><b>{kind === 'comparison' ? 'Opciones e imágenes' : 'Respuestas posibles'}</b>{options.map((op,i) => <div className="option-edit" key={i}><input required value={op} onChange={e => setOptions(v => v.map((x,j) => j === i ? e.target.value : x))} placeholder={kind === 'comparison' ? 'Nombre de la opción ' + (i+1) : 'Respuesta ' + (i+1)}/>{kind === 'comparison' && <label className="file-mini">Foto {i+1}<input required={i < 2 && !imageFiles[i]} type="file" accept="image/png,image/jpeg,image/webp,image/avif" onChange={e => setImageFiles(v => v.map((x,j) => j === i ? e.target.files?.[0] || null : x))}/></label>}</div>)}{options.length < (kind === 'comparison' ? 6 : 8) && <button type="button" className="add-option" onClick={() => {setOptions(v => [...v,'']);setImageFiles(v => [...v,null]);}}>＋ Añadir opción personalizada</button>}</div>}
         <label className="check-row"><input type="checkbox" checked={anonymous} onChange={e => setAnonymous(e.target.checked)}/> Permitir participación anónima</label>
@@ -401,9 +403,9 @@ function ExperienceEditor({item,close,saved}) {
     if(item.kind!=='confession'&&questions.some(q=>(q.options||[]).filter(o=>o.label?.trim()).length<2))throw new Error('Cada pregunta necesita al menos dos opciones.');
     const {error:ue}=await supabase.from('experiences').update({title:title.trim(),description:description.trim(),updated_at:new Date().toISOString()}).eq('id',item.id);
     if(ue)throw ue;
-    const keep=questions.filter(q=>q.id).map(q=>q.id);
-    if(keep.length){const {error:de}=await supabase.from('experience_questions').delete().eq('experience_id',item.id).not('id','in','('+keep.join(',')+')');if(de)throw de;}
-    else {const {error:de}=await supabase.from('experience_questions').delete().eq('experience_id',item.id);if(de)throw de;}
+    const {data:existing,error:se}=await supabase.from('experience_questions').select('id').eq('experience_id',item.id);if(se)throw se;
+    const keep=questions.filter(q=>q.id).map(q=>q.id);const remove=(existing||[]).map(q=>q.id).filter(id=>!keep.includes(id));
+    if(remove.length){const {error:de}=await supabase.from('experience_questions').delete().in('id',remove);if(de)throw de;}
     for(let i=0;i<questions.length;i++){const q=questions[i];const row={experience_id:item.id,position:i,prompt:q.prompt.trim(),answer_type:q.answer_type,options:(q.options||[]).filter(o=>o.label?.trim()),media:q.media||[]};const result=q.id?await supabase.from('experience_questions').update(row).eq('id',q.id):await supabase.from('experience_questions').insert(row);if(result.error)throw result.error;}
     await saved();
   }catch(err){setError(err.message||'No se pudieron guardar los cambios.');}finally{setBusy(false);}}
