@@ -26,12 +26,12 @@ const trackActivity = async (profileId, experienceId, eventType) => {
     const storageKey = 'interaccion:activity:' + eventType + ':' + target + ':' + today;
     let visitorKey = localStorage.getItem('interaccion:visitor');
     if (!visitorKey) { visitorKey = crypto.randomUUID(); localStorage.setItem('interaccion:visitor', visitorKey); }
-    if (localStorage.getItem(storageKey)) return;
+    if (eventType !== 'experience_response' && localStorage.getItem(storageKey)) return;
     const { error } = await supabase.from('profile_activity').insert({
       profile_id: profileId, experience_id: experienceId, visitor_key: visitorKey,
       event_type: eventType, visit_day: today
     });
-    if (!error || error.code === '23505') localStorage.setItem(storageKey, '1');
+    if ((!error || error.code === '23505') && eventType !== 'experience_response') localStorage.setItem(storageKey, '1');
   } catch { /* Analytics never blocks access to public content. */ }
 };
 const uploadImage = async (file, userId) => {
@@ -44,22 +44,6 @@ const uploadImage = async (file, userId) => {
   if (error) throw error;
   return supabase.storage.from('interaccion-media').getPublicUrl(path).data.publicUrl;
 };
-
-const getVisitorKey = () => {
-  try {
-    let key = localStorage.getItem('interaccion_visitor_key');
-    if (!key) { key = crypto.randomUUID(); localStorage.setItem('interaccion_visitor_key', key); }
-    return key;
-  } catch { return crypto.randomUUID(); }
-};
-async function trackActivity(profileId, experienceId, eventType) {
-  if (!supabase || !profileId) return;
-  const { error } = await supabase.from('profile_activity').insert({
-    profile_id: profileId, experience_id: experienceId || null,
-    visitor_key: getVisitorKey(), event_type: eventType
-  });
-  if (error && error.code !== '23505') console.warn('No se pudo registrar la actividad:', error.message);
-}
 
 function Brand() { return <a className="brand" href={BASE}><span className="brand-icon">i</span><span>interacción</span></a>; }
 function Button({ children, kind = 'primary', ...props }) { return <button className={'btn btn-' + kind} {...props}>{children}</button>; }
