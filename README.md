@@ -1,13 +1,13 @@
 # Interacción
 
 Plataforma estática para crear y compartir experiencias:
-- **¿Qué tanto me conoces?** — retos con varias preguntas y opciones.
+- **¿Qué tanto me conoces?** — retos con varias preguntas, opciones y puntuación automática.
 - **Secretos y confesiones** — mensajes privados visibles solo para la persona creadora.
-- **Cara a cara** — comparativas con dos imágenes y votación.
+- **Cara a cara** — comparativas de imágenes y votación. Evita usar este formato para calificar la apariencia física de personas.
 
-## Arquitectura
+## Funciones del panel\n- Creador guiado por tipo, plantillas y modo personalizado.\n- Edición de títulos, descripciones, preguntas y opciones.\n- Duplicar, publicar, pausar, archivar, restaurar y eliminar experiencias.\n- Bandeja de respuestas con búsqueda, selección múltiple y eliminación.\n- Estadísticas de los últimos 30 días y actividad reciente por perfil y experiencia.\n- Los contadores estiman visitas únicas por navegador/día; no registran direcciones IP ni identifican a las visitas.\n\n## Arquitectura
 - React + Vite, desplegado como sitio estático en **GitHub Pages**.
-- Supabase Auth para cuentas, Postgres para perfiles/experiencias/respuestas y Storage para imágenes.
+- Supabase Auth para cuentas, Postgres con RLS para perfiles/experiencias/respuestas/actividad y Storage para imágenes.
 - Los visitantes pueden abrir enlaces y responder sin registrarse.
 - Las rutas se comparten como hash URLs (`/#/u/usuario` y `/#/e/experiencia`) para que funcionen en GitHub Pages sin servidor de reescritura.
 
