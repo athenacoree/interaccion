@@ -556,7 +556,7 @@ function ConversationPanel({ entryId, mode='respondent', receiptToken='' }) {
       <span className="conversation-chevron">{open?'⌃':'⌄'}</span>
     </button>
     {open && <div className="conversation-content">
-      <div className="conversation-note"><span className="conversation-online-dot"/>{mode==='owner'?'Este diálogo solo lo ven tú y quien participó.':'Aquí puedes leer las respuestas del creador y contestarle.'}</div>
+      <div className="conversation-note"><span className="conversation-online-dot"/><span>{mode==='owner'?'Este diálogo solo lo ven tú y quien participó.':'Aquí puedes leer las respuestas del creador y contestarle.'}</span><button type="button" onClick={refresh}>Actualizar ↻</button></div>
       <div className="conversation-messages">
         {loading?<div className="conversation-empty">Cargando conversación…</div>:messages.length?messages.map(message=><article key={message.id} className={'chat-bubble '+(message.sender_role===mode?'chat-mine':'chat-theirs')}>
           <small>{message.sender_name} · {new Date(message.created_at).toLocaleString()}</small><p>{message.body}</p>
