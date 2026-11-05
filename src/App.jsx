@@ -4,146 +4,270 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
-
-const experiences = [
-  { kind: 'know_me', number: '01', icon: '✦', title: '¿Qué tanto me conoces?', text: 'Descubre quién conoce tus gustos, tus manías y esas pequeñas cosas que te hacen ser tú.', tag: 'El reto personal', color: 'violet' },
-  { kind: 'confession', number: '02', icon: '✉', title: 'Secretos y confesiones', text: 'Abre un espacio para pensamientos, mensajes y confesiones. Tú decides cómo recibirlos.', tag: 'Sin filtros, con respeto', color: 'rose' },
-  { kind: 'comparison', number: '03', icon: '◈', title: 'Cara a cara', text: 'Pon dos fotos frente a frente, escribe tu pregunta y deja que las personas elijan.', tag: 'La comunidad decide', color: 'blue' },
+const BASE = import.meta.env.BASE_URL || '/';
+const SOCIAL_IMAGE = 'https://commons.wikimedia.org/wiki/Special:FilePath/TheStarryNightByVincentVanGogh.jpg';
+const kinds = [
+  { id: 'know_me', name: '¿Qué tanto me conoces?', short: 'Conóceme', icon: '✳', detail: 'Crea un reto con preguntas sobre tus gustos y tu personalidad.' },
+  { id: 'confession', name: 'Secretos y confesiones', short: 'Confesiones', icon: '✉', detail: 'Recibe mensajes y pensamientos de forma privada.' },
+  { id: 'comparison', name: 'Cara a cara', short: 'Comparativas', icon: '◫', detail: 'Pon dos imágenes frente a frente y deja que voten.' },
 ];
+const makeSlug = (s) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 48) || 'mi-experiencia';
+const route = () => {
+  const value = location.hash.replace(/^#\/?/, '');
+  const [type, ...parts] = value.split('/');
+  return { type: type || 'home', value: parts.join('/') };
+};
+const publicUrl = (path) => location.origin + location.pathname + '#/' + path;
+const uploadImage = async (file, userId) => {
+  if (!file || !supabase) return null;
+  if (!['image/jpeg', 'image/png', 'image/webp', 'image/avif'].includes(file.type)) throw new Error('Usa una imagen JPG, PNG, WebP o AVIF.');
+  if (file.size > 10 * 1024 * 1024) throw new Error('La imagen no puede superar 10 MB.');
+  const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+  const path = userId + '/' + crypto.randomUUID() + '.' + ext;
+  const { error } = await supabase.storage.from('interaccion-media').upload(path, file, { cacheControl: '31536000', upsert: false });
+  if (error) throw error;
+  return supabase.storage.from('interaccion-media').getPublicUrl(path).data.publicUrl;
+};
 
-function Stars() {
-  return <div className="stars" aria-hidden="true"><span className="star-layer star-one"/><span className="star-layer star-two"/><span className="shooting-star"/></div>;
-}
+function Brand() { return <a className="brand" href={BASE}><span className="brand-icon">i</span><span>interacción</span></a>; }
+function Button({ children, kind = 'primary', ...props }) { return <button className={'btn btn-' + kind} {...props}>{children}</button>; }
+function Notice({ error, success }) { return <>{error && <p className="notice error">{error}</p>}{success && <p className="notice success">{success}</p>}</>; }
 
-function AuthDialog({ onClose, onSignedIn }) {
+function AuthDialog({ close, done }) {
   const [mode, setMode] = useState('signup');
+  const [form, setForm] = useState({ name: '', username: '', email: '', password: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
-  const [form, setForm] = useState({ name: '', username: '', email: '', password: '' });
-
-  const change = (key) => (event) => setForm((old) => ({ ...old, [key]: event.target.value }));
-
-  async function submit(event) {
-    event.preventDefault();
-    if (!supabase) { setError('Falta configurar la conexión de Supabase en las variables de entorno.'); return; }
-    setBusy(true); setError(''); setMessage('');
+  const [success, setSuccess] = useState('');
+  const set = (k) => (e) => setForm(v => ({ ...v, [k]: e.target.value }));
+  async function submit(e) {
+    e.preventDefault(); setBusy(true); setError(''); setSuccess('');
     try {
+      if (!supabase) throw new Error('La conexión de Supabase aún no está configurada. Añade las variables indicadas en el README.');
       if (mode === 'signup') {
-        const username = form.username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-        if (username.length < 3) throw new Error('El usuario debe tener al menos 3 caracteres.');
-        const { data, error: authError } = await supabase.auth.signUp({ email: form.email, password: form.password, options: { data: { display_name: form.name.trim(), username } } });
-        if (authError) throw authError;
+        const username = form.username.trim().toLowerCase();
+        if (!/^[a-z0-9_]{3,24}$/.test(username)) throw new Error('El identificador debe tener entre 3 y 24 caracteres: letras, números o guion bajo.');
+        const { data, error: e1 } = await supabase.auth.signUp({ email: form.email.trim(), password: form.password, options: { data: { username, display_name: form.name.trim() }, emailRedirectTo: publicUrl('') } });
+        if (e1) throw e1;
         if (data.session && data.user) {
-          const { error: profileError } = await supabase.from('profiles').insert({ id: data.user.id, username, display_name: form.name.trim() });
-          if (profileError) throw profileError;
-          onSignedIn(data.user);
-        } else {
-          setMessage('Revisa tu correo para confirmar la cuenta. Después podrás completar tu perfil.');
-        }
+          const { error: e2 } = await supabase.from('profiles').upsert({ id: data.user.id, username, display_name: form.name.trim() });
+          if (e2) throw e2;
+          done(data.user);
+        } else setSuccess('Te enviamos un correo de confirmación. Cuando confirmes, inicia sesión para terminar de crear tu espacio.');
       } else {
-        const { data, error: authError } = await supabase.auth.signInWithPassword({ email: form.email, password: form.password });
-        if (authError) throw authError;
-        onSignedIn(data.user);
+        const { data, error: e1 } = await supabase.auth.signInWithPassword({ email: form.email.trim(), password: form.password });
+        if (e1) throw e1;
+        done(data.user);
       }
-    } catch (e) { setError(e.message || 'No se pudo completar la operación.'); }
+    } catch (e2) { setError(e2.message || 'No se pudo completar.'); }
     finally { setBusy(false); }
   }
-
-  return <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-    <section className="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
-      <button className="modal-close" onClick={onClose} aria-label="Cerrar">×</button>
-      <div className="eyebrow">TU ESPACIO TE ESPERA</div>
-      <h2 id="auth-title">{mode === 'signup' ? 'Empieza tu historia' : 'Qué bueno verte'}</h2>
-      <p className="muted">{mode === 'signup' ? 'Crea tu cuenta y consigue tus propios enlaces para compartir.' : 'Entra para administrar tus experiencias.'}</p>
-      <form onSubmit={submit} className="auth-form">
-        {mode === 'signup' && <>
-          <label>Cómo te llamas<input required maxLength="60" value={form.name} onChange={change('name')} placeholder="Tu nombre" /></label>
-          <label>Tu identificador<input required minLength="3" maxLength="24" pattern="[A-Za-z0-9_]+" value={form.username} onChange={change('username')} placeholder="tu_usuario" /></label>
-        </>}
-        <label>Correo electrónico<input required type="email" value={form.email} onChange={change('email')} placeholder="hola@ejemplo.com" /></label>
-        <label>Contraseña<input required minLength="8" type="password" value={form.password} onChange={change('password')} placeholder="Mínimo 8 caracteres" /></label>
-        {error && <p className="form-error">{error}</p>}
-        {message && <p className="form-success">{message}</p>}
-        <button className="button button-primary full" disabled={busy}>{busy ? 'Un momento…' : mode === 'signup' ? 'Crear mi cuenta ↗' : 'Iniciar sesión ↗'}</button>
-      </form>
-      <p className="switch-auth">{mode === 'signup' ? '¿Ya tienes cuenta?' : '¿Todavía no tienes cuenta?'} <button onClick={() => { setMode(mode === 'signup' ? 'login' : 'signup'); setError(''); setMessage(''); }}>{mode === 'signup' ? 'Inicia sesión' : 'Crear cuenta'}</button></p>
-    </section>
-  </div>;
-}
-
-function Dashboard({ user, onSignOut }) {
-  const [profile, setProfile] = useState(null);
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    let active = true;
-    async function load() {
-      let { data: p } = await supabase.from('profiles').select('username,display_name').eq('id', user.id).maybeSingle();
-      // If email confirmation delayed profile creation, finish it safely after the first authenticated sign-in.
-      if (!p) {
-        const metadata = user.user_metadata || {};
-        const username = String(metadata.username || '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 24);
-        const displayName = String(metadata.display_name || '').trim().slice(0, 60);
-        if (username.length >= 3 && displayName.length) {
-          const { data: created } = await supabase.from('profiles')
-            .insert({ id: user.id, username, display_name: displayName })
-            .select('username,display_name').maybeSingle();
-          p = created;
-        }
-      }
-      const { data: ex } = await supabase.from('experiences').select('id,slug,kind,title,status,is_public,created_at').eq('owner_id', user.id).order('created_at', { ascending: false });
-      if (active) { setProfile(p); setItems(ex || []); setLoading(false); }
-    }
-    load();
-    return () => { active = false; };
-  }, [user.id]);
-  return <main className="dashboard-shell">
-    <header className="dash-top"><a className="brand" href="/"><span className="brand-mark">i.</span> interacción</a><button className="button button-quiet" onClick={onSignOut}>Cerrar sesión</button></header>
-    <section className="dash-welcome"><div className="eyebrow">TU UNIVERSO</div><h1>Hola{profile?.display_name ? ', ' + profile.display_name : ''}.</h1><p className="muted">Aquí viven tus enlaces, tus ideas y las respuestas de tu gente.</p><div className="profile-link">interaccion.app/@{profile?.username || 'configura-tu-usuario'}</div></section>
-    <section className="dash-section"><div className="section-heading"><div><div className="eyebrow">TU CONTENIDO</div><h2>Tus experiencias</h2></div></div>
-      {loading ? <p className="muted">Cargando tu espacio…</p> : items.length ? <div className="experience-list">{items.map(x => <article className="experience-row" key={x.id}><div><strong>{x.title}</strong><small>{x.kind} · {x.status === 'published' ? 'Publicado' : 'Borrador'}</small></div><span className="muted">/{x.slug}</span></article>)}</div> : <div className="empty-state"><span>✧</span><h3>Tu primera experiencia empieza aquí</h3><p className="muted">Estamos preparando el creador para que diseñes tus preguntas, confesiones y comparativas.</p></div>}
-    </section>
-  </main>;
+  return <div className="overlay" onMouseDown={e => e.target === e.currentTarget && close()}><section className="modal">
+    <button className="x" onClick={close} aria-label="Cerrar">×</button><div className="kicker">TU ESPACIO PERSONAL</div>
+    <h2>{mode === 'signup' ? 'Empieza por ti.' : 'Qué bueno verte.'}</h2><p className="subtle">{mode === 'signup' ? 'Crea tu cuenta y recibe tu propio enlace para compartir.' : 'Entra para continuar con tus experiencias.'}</p>
+    <form className="form" onSubmit={submit}>
+      {mode === 'signup' && <><label>Tu nombre<input required maxLength="60" value={form.name} onChange={set('name')} placeholder="Cómo quieres aparecer" /></label><label>Tu identificador<input required minLength="3" maxLength="24" pattern="[a-zA-Z0-9_]+" value={form.username} onChange={set('username')} placeholder="tu_usuario" /></label></>}
+      <label>Correo electrónico<input type="email" required value={form.email} onChange={set('email')} placeholder="tu@correo.com" /></label>
+      <label>Contraseña<input type="password" required minLength="8" value={form.password} onChange={set('password')} placeholder="Al menos 8 caracteres" /></label>
+      <Notice error={error} success={success} /><Button disabled={busy}>{busy ? 'Un momento…' : mode === 'signup' ? 'Crear cuenta ↗' : 'Iniciar sesión ↗'}</Button>
+    </form>
+    <p className="switch">{mode === 'signup' ? '¿Ya tienes cuenta?' : '¿Aún no tienes cuenta?'} <button onClick={() => { setMode(mode === 'signup' ? 'login' : 'signup'); setError(''); setSuccess(''); }}>{mode === 'signup' ? 'Inicia sesión' : 'Regístrate'}</button></p>
+  </section></div>;
 }
 
 function App() {
-  const [authOpen, setAuthOpen] = useState(false);
+  const [page, setPage] = useState(route());
   const [user, setUser] = useState(null);
-  const [sessionReady, setSessionReady] = useState(false);
-  const [activeKind, setActiveKind] = useState('all');
-
+  const [ready, setReady] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
   useEffect(() => {
-    if (!supabase) { setSessionReady(true); return; }
-    supabase.auth.getSession().then(({ data }) => { setUser(data.session?.user || null); setSessionReady(true); });
+    const change = () => setPage(route());
+    window.addEventListener('hashchange', change);
+    if (!supabase) { setReady(true); return () => window.removeEventListener('hashchange', change); }
+    supabase.auth.getSession().then(({ data }) => { setUser(data.session?.user || null); setReady(true); });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => setUser(session?.user || null));
-    return () => listener.subscription.unsubscribe();
+    return () => { window.removeEventListener('hashchange', change); listener.subscription.unsubscribe(); };
   }, []);
+  async function signOut() { await supabase?.auth.signOut(); setUser(null); location.hash = ''; }
+  if (!ready) return <div className="boot"><span className="brand-icon">i</span><p>Preparando tu espacio…</p></div>;
+  if (page.type === 'u' && page.value) return <PublicProfile username={page.value} openAuth={() => setAuthOpen(true)} />;
+  if (page.type === 'e' && page.value) return <PublicExperience slug={page.value} openAuth={() => setAuthOpen(true)} />;
+  if (user) return <Dashboard user={user} signOut={signOut} />;
+  return <Landing openAuth={() => setAuthOpen(true)} authOpen={authOpen} closeAuth={() => setAuthOpen(false)} onSignedIn={u => { setUser(u); setAuthOpen(false); }} />;
+}
 
-  const visible = useMemo(() => activeKind === 'all' ? experiences : experiences.filter(x => x.kind === activeKind), [activeKind]);
-
-  async function signOut() { await supabase?.auth.signOut(); setUser(null); }
-  if (!sessionReady) return <div className="loading-screen"><span className="brand-mark">i.</span><p>Preparando tu universo…</p></div>;
-  if (user) return <Dashboard user={user} onSignOut={signOut} />;
-
-  return <div className="site-shell">
-    <Stars />
-    <nav className="nav wrap"><a className="brand" href="#"><span className="brand-mark">i.</span> interacción</a><div className="nav-links"><a href="#experiencias">Experiencias</a><a href="#como-funciona">Cómo funciona</a></div><button className="button button-outline" onClick={() => setAuthOpen(true)}>Entrar <span>↗</span></button></nav>
+function Landing({ openAuth, authOpen, closeAuth, onSignedIn }) {
+  const [active, setActive] = useState('all');
+  const cards = active === 'all' ? kinds : kinds.filter(k => k.id === active);
+  return <div className="app">
+    <header className="topbar wrap"><Brand/><nav><a href="#types">Experiencias</a><a href="#how">Cómo funciona</a></nav><Button kind="soft" onClick={openAuth}>Entrar ↗</Button></header>
     <main>
-      <section className="hero wrap">
-        <div className="hero-copy"><div className="eyebrow"><span className="live-dot"/> UN LUGAR PARA CONECTAR DE VERDAD</div><h1>Hay cosas que<br/>solo pasan cuando<br/><em>interactuamos.</em></h1><p className="hero-text">Crea preguntas, descubre secretos y deja que todos elijan. Comparte momentos que hacen que las personas se conozcan de otra manera.</p><div className="hero-actions"><button className="button button-primary" onClick={() => setAuthOpen(true)}>Crear mi espacio <span>↗</span></button><a className="text-link" href="#experiencias">Explorar experiencias <span>↓</span></a></div><div className="hero-note"><span className="avatars"><i>✦</i><i>♡</i><i>◈</i></span><span>Tu enlace. Tus reglas. Tu gente.</span></div></div>
-        <div className="hero-art"><div className="orbit orbit-a"/><div className="orbit orbit-b"/><div className="planet"><div className="planet-glow"/><span>i.</span></div><div className="float-card float-card-one"><span>✦</span><div><b>¿Cuánto me conoces?</b><small>Una pregunta puede decir mucho</small></div></div><div className="float-card float-card-two"><span>♡</span><div><b>Vota por tu favorita</b><small>Dos opciones, una decisión</small></div></div><div className="tiny-star star-a">✧</div><div className="tiny-star star-b">✦</div><div className="tiny-star star-c">·</div></div>
+      <section className="hero wrap"><div className="hero-text"><div className="kicker"><span className="live"/> UN ESPACIO PARA CONECTAR</div><h1>Conócete.<br/>Exprésate.<br/><em>Interactúa.</em></h1><p>Preguntas que acercan, confesiones que se quedan contigo y comparativas que despiertan conversaciones. Crea algo tuyo y compártelo con un enlace.</p><div className="hero-actions"><Button onClick={openAuth}>Crear mi espacio <span>↗</span></Button><a className="text-link" href="#types">Descubrir cómo funciona ↓</a></div><div className="hero-proof"><span className="proof-icons"><i>✳</i><i>♡</i><i>◫</i></span> Tu enlace. Tus reglas. Tu gente.</div></div>
+        <div className="hero-visual"><div className="glass-phone"><div className="phone-top"><span>9:41</span><span>● ● ●</span></div><div className="phone-notch"></div><div className="phone-greeting">Tu mundo,<br/><b>a tu manera.</b></div><div className="phone-chip">✦ Tu espacio está listo</div><div className="phone-question"><small>UNA PREGUNTA PARA TI</small><strong>¿Qué recuerdo nunca olvidarías?</strong><div className="fake-lines"><i/><i/><i/></div></div><div className="phone-bottom"><span>⌂</span><span>♡</span><span>✧</span></div></div><div className="float-note note-one"><span>♡</span><div><b>Una respuesta nueva</b><small>Alguien participó en tu enlace</small></div></div><div className="float-note note-two"><span>◫</span><div><b>Tu comparativa</b><small>Lista para compartir</small></div></div><div className="glow-orb"></div></div>
       </section>
-      <section className="experience-section wrap" id="experiencias"><div className="section-heading"><div><div className="eyebrow">UN UNIVERSO DE POSIBILIDADES</div><h2>¿Qué quieres descubrir?</h2></div><p className="muted heading-note">Elige una experiencia y hazla tuya.</p></div>
-        <div className="filters"><button className={activeKind === 'all' ? 'filter active' : 'filter'} onClick={() => setActiveKind('all')}>Todas</button><button className={activeKind === 'know_me' ? 'filter active' : 'filter'} onClick={() => setActiveKind('know_me')}>Conóceme</button><button className={activeKind === 'confession' ? 'filter active' : 'filter'} onClick={() => setActiveKind('confession')}>Confesiones</button><button className={activeKind === 'comparison' ? 'filter active' : 'filter'} onClick={() => setActiveKind('comparison')}>Comparativas</button></div>
-        <div className="experience-grid">{visible.map(x => <article className={'experience-card '+x.color} key={x.kind}><div className="card-top"><span className="card-number">{x.number} / 03</span><span className="card-icon">{x.icon}</span></div><div className="card-content"><span className="card-tag">{x.tag}</span><h3>{x.title}</h3><p>{x.text}</p><button className="card-action" onClick={() => setAuthOpen(true)}>Crear experiencia <span>↗</span></button></div><div className="card-decoration"/></article>)}</div>
+      <section className="section wrap" id="types"><div className="section-head"><div><div className="kicker">TRES FORMAS DE INTERACTUAR</div><h2>¿Qué quieres crear?</h2></div><p>Elige una idea. Personalízala. Compártela.</p></div>
+        <div className="tabs"><button className={active === 'all' ? 'selected' : ''} onClick={() => setActive('all')}>Todas</button>{kinds.map(k => <button key={k.id} className={active === k.id ? 'selected' : ''} onClick={() => setActive(k.id)}>{k.short}</button>)}</div>
+        <div className="type-grid">{cards.map((k, i) => <article className={'type-card tone-' + k.id} key={k.id}><div className="type-card-top"><span>0{i + 1} / 03</span><b>{k.icon}</b></div><div className="type-copy"><small>{k.short.toUpperCase()}</small><h3>{k.name}</h3><p>{k.detail}</p><button onClick={openAuth}>Crear experiencia <span>↗</span></button></div></article>)}</div>
       </section>
-      <section className="how-section wrap" id="como-funciona"><div className="eyebrow">ASÍ DE SENCILLO</div><h2>De una idea a un enlace<br/><em>que todos quieren abrir.</em></h2><div className="steps"><div><span>01</span><h3>Crea</h3><p>Diseña una experiencia con tus preguntas, fotos y opciones.</p></div><div><span>02</span><h3>Comparte</h3><p>Obtén un enlace propio. Cualquiera podrá entrar sin registrarse.</p></div><div><span>03</span><h3>Descubre</h3><p>Recibe respuestas y revisa los resultados desde tu panel.</p></div></div></section>
-      <section className="final-cta wrap"><div className="cta-spark">✧</div><div className="eyebrow">TU HISTORIA EMPIEZA AQUÍ</div><h2>¿Y si hoy descubres<br/><em>algo nuevo?</em></h2><p className="muted">Crea tu espacio y comparte tu primer enlace.</p><button className="button button-primary" onClick={() => setAuthOpen(true)}>Quiero empezar <span>↗</span></button></section>
+      <section className="how wrap" id="how"><div className="kicker">SIN COMPLICACIONES</div><h2>De una idea a un enlace<br/><em>que todos pueden abrir.</em></h2><div className="steps"><article><span>01</span><h3>Crea</h3><p>Diseña preguntas, añade fotos y personaliza tus opciones.</p></article><article><span>02</span><h3>Comparte</h3><p>Obtén un enlace. Las personas pueden participar sin crear cuenta.</p></article><article><span>03</span><h3>Descubre</h3><p>Consulta las respuestas y resultados desde tu espacio privado.</p></article></div></section>
+      <section className="cta wrap"><div className="cta-symbol">✳</div><div className="kicker">EMPIEZA CUANDO QUIERAS</div><h2>Tu próxima historia<br/><em>empieza con una pregunta.</em></h2><p>Crea tu cuenta y publica tu primera experiencia.</p><Button onClick={openAuth}>Crear mi espacio ↗</Button></section>
     </main>
-    <footer className="footer wrap"><a className="brand" href="#"><span className="brand-mark">i.</span> interacción</a><span>Hecho para conectar ✦</span><button onClick={() => setAuthOpen(true)}>Crea tu cuenta</button></footer>
-    {authOpen && <AuthDialog onClose={() => setAuthOpen(false)} onSignedIn={(nextUser) => { setUser(nextUser); setAuthOpen(false); }} />}
+    <footer className="footer wrap"><Brand/><span>Un lugar para conectar de otra manera.</span><button onClick={openAuth}>Crear cuenta</button></footer>
+    {authOpen && <AuthDialog close={closeAuth} done={onSignedIn}/>}
   </div>;
 }
+
+function Dashboard({ user, signOut }) {
+  const [profile, setProfile] = useState(null);
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreator, setShowCreator] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [entries, setEntries] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  async function load() {
+    setLoading(true); setError('');
+    let { data: p, error: pe } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
+    if (!p) {
+      const meta = user.user_metadata || {};
+      const username = String(meta.username || '').toLowerCase();
+      const display_name = String(meta.display_name || '').trim();
+      if (/^[a-z0-9_]{3,24}$/.test(username) && display_name) {
+        const { data: made, error: me } = await supabase.from('profiles').upsert({ id: user.id, username, display_name }).select().single();
+        if (!me) p = made; else setError(me.message);
+      } else if (pe) setError(pe.message);
+    }
+    const { data: ex, error: ee } = await supabase.from('experiences').select('*').eq('owner_id', user.id).order('created_at', { ascending: false });
+    setProfile(p); setItems(ex || []); if (ee) setError(ee.message); setLoading(false);
+  }
+  useEffect(() => { load(); }, [user.id]);
+  async function openEntries(item) {
+    setSelected(item);
+    const { data, error: e } = await supabase.from('experience_entries').select('*').eq('experience_id', item.id).order('created_at', { ascending: false }).limit(100);
+    if (e) setError(e.message); else setEntries(data || []);
+  }
+  async function removeEntry(id) {
+    if (!confirm('¿Eliminar esta respuesta?')) return;
+    const { error: e } = await supabase.from('experience_entries').delete().eq('id', id);
+    if (e) setError(e.message); else { setEntries(v => v.filter(x => x.id !== id)); setSuccess('Respuesta eliminada.'); }
+  }
+  return <div className="dashboard">
+    <header className="dashbar wrap"><Brand/><div className="dash-actions"><a href={profile?.username ? publicUrl('u/' + profile.username) : '#'} target="_blank" rel="noreferrer">Ver mi perfil ↗</a><Button kind="soft" onClick={signOut}>Salir</Button></div></header>
+    <main className="dash-main wrap"><div className="dash-intro"><div><div className="kicker">TU ESPACIO PERSONAL</div><h1>Hola, {profile?.display_name || 'bienvenido'}.</h1><p>Administra tus experiencias y mira lo que tu gente comparte contigo.</p></div><Button onClick={() => setShowCreator(true)}>＋ Crear experiencia</Button></div>
+      <Notice error={error} success={success}/>
+      {profile && <ProfileEditor profile={profile} user={user} onSaved={async p => { setProfile(p); setEditingProfile(false); setSuccess('Tu perfil se actualizó.'); }} editing={editingProfile} setEditing={setEditingProfile}/>}
+      {!profile && !loading && <div className="panel"><h3>Completa tu perfil</h3><p className="subtle">No pudimos encontrar el perfil asociado a esta cuenta. Revisa el identificador y vuelve a intentarlo.</p><Button kind="soft" onClick={load}>Volver a cargar</Button></div>}
+      <div className="dash-title"><div><div className="kicker">TU CONTENIDO</div><h2>Tus experiencias</h2></div><span>{items.length} creadas</span></div>
+      {loading ? <div className="panel">Cargando tus experiencias…</div> : items.length ? <div className="my-grid">{items.map(item => <article className="my-card" key={item.id}><div className="my-card-top"><span className={'kind-icon ' + item.kind}>{kinds.find(k => k.id === item.kind)?.icon}</span><span className={'status ' + item.status}>{item.status === 'published' ? 'Publicada' : 'Borrador'}</span></div><h3>{item.title}</h3><p>{item.description || kinds.find(k => k.id === item.kind)?.detail}</p><div className="my-link">{publicUrl('e/' + item.slug)}</div><div className="my-card-actions"><button onClick={() => openEntries(item)}>Ver respuestas</button><a href={'#/e/' + item.slug} target="_blank" rel="noreferrer">Abrir ↗</a></div></article>)}</div> : <div className="empty panel"><span>✧</span><h3>Este espacio está esperando tu primera idea.</h3><p>Crea una experiencia y comparte el enlace con tus personas favoritas.</p><Button onClick={() => setShowCreator(true)}>Crear mi primera experiencia</Button></div>}
+      {selected && <section className="panel responses"><div className="responses-head"><div><div className="kicker">RESPUESTAS RECIBIDAS</div><h2>{selected.title}</h2></div><button className="close-small" onClick={() => setSelected(null)}>Cerrar ×</button></div>{entries.length ? entries.map(entry => <article className="entry" key={entry.id}><div><b>{entry.is_anonymous ? 'Anónimo' : entry.respondent_name || 'Participante'}</b><small>{new Date(entry.created_at).toLocaleString()}</small></div><pre>{JSON.stringify(entry.answers, null, 2)}</pre><button className="danger-link" onClick={() => removeEntry(entry.id)}>Eliminar respuesta</button></article>) : <p className="subtle">Todavía no hay respuestas para esta experiencia.</p>}</section>}
+    </main>
+    {showCreator && <Creator user={user} close={() => setShowCreator(false)} created={async () => { setShowCreator(false); setSuccess('Tu experiencia ya está creada.'); await load(); }}/>}
+  </div>;
+}
+
+function ProfileEditor({ profile, user, editing, setEditing, onSaved }) {
+  const [name, setName] = useState(profile.display_name || '');
+  const [bio, setBio] = useState(profile.bio || '');
+  const [avatar, setAvatar] = useState(profile.avatar_url || '');
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  async function save(e) {
+    e.preventDefault(); setBusy(true); setError('');
+    try {
+      const url = file ? await uploadImage(file, user.id) : avatar;
+      const { data, error: e1 } = await supabase.from('profiles').update({ display_name: name.trim(), bio: bio.trim(), avatar_url: url || null }).eq('id', user.id).select().single();
+      if (e1) throw e1; onSaved(data);
+    } catch (e1) { setError(e1.message); } finally { setBusy(false); }
+  }
+  return <section className="profile-panel panel"><div className="profile-summary">{avatar ? <img src={avatar} alt="Foto de perfil"/> : <div className="avatar-placeholder">{(profile.display_name || 'I').slice(0,1).toUpperCase()}</div>}<div><b>{profile.display_name}</b><span>@{profile.username}</span><small>{profile.bio || 'Añade una pequeña descripción a tu perfil.'}</small></div><Button kind="soft" onClick={() => setEditing(!editing)}>{editing ? 'Cancelar' : 'Editar perfil'}</Button></div>
+    {editing && <form className="profile-form" onSubmit={save}><label>Nombre visible<input value={name} onChange={e => setName(e.target.value)} maxLength="60" required/></label><label>Descripción<textarea value={bio} onChange={e => setBio(e.target.value)} maxLength="180" placeholder="Cuéntales algo sobre ti…"/></label><label>Foto de perfil<input type="file" accept="image/png,image/jpeg,image/webp,image/avif" onChange={e => setFile(e.target.files?.[0] || null)}/></label>{error && <Notice error={error}/>}<Button disabled={busy}>{busy ? 'Guardando…' : 'Guardar cambios'}</Button></form>}
+  </section>;
+}
+
+function Creator({ user, close, created }) {
+  const [kind, setKind] = useState('know_me');
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [prompt, setPrompt] = useState('');
+  const [options, setOptions] = useState(['Opción 1', 'Opción 2']);
+  const [imageFiles, setImageFiles] = useState([null, null]);
+  const [anonymous, setAnonymous] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [publish, setPublish] = useState(true);
+  const current = kinds.find(k => k.id === kind);
+  const needsOptions = kind !== 'confession';
+  async function submit(e) {
+    e.preventDefault(); setBusy(true); setError('');
+    try {
+      const cleanTitle = title.trim();
+      const slug = makeSlug(cleanTitle) + '-' + crypto.randomUUID().slice(0, 6);
+      const { data: ex, error: ee } = await supabase.from('experiences').insert({ owner_id: user.id, slug, kind, title: cleanTitle, description: description.trim(), status: publish ? 'published' : 'draft', is_public: true, settings: { allow_anonymous: anonymous } }).select().single();
+      if (ee) throw ee;
+      let questionOptions = [];
+      if (needsOptions) {
+        questionOptions = await Promise.all(options.map(async (label, i) => ({ label: label.trim(), image_url: imageFiles[i] ? await uploadImage(imageFiles[i], user.id) : null })).filter ? [] : []);
+        questionOptions = [];
+        for (let i = 0; i < options.length; i++) questionOptions.push({ label: options[i].trim(), image_url: imageFiles[i] ? await uploadImage(imageFiles[i], user.id) : null });
+      }
+      const { error: qe } = await supabase.from('experience_questions').insert({ experience_id: ex.id, position: 0, prompt: prompt.trim(), answer_type: kind === 'confession' ? 'text' : kind === 'comparison' ? 'image_choice' : 'single_choice', options: questionOptions, media: [] });
+      if (qe) throw qe;
+      await created();
+    } catch (e1) { setError(e1.message || 'No se pudo crear.'); } finally { setBusy(false); }
+  }
+  return <div className="overlay"><section className="modal creator-modal"><button className="x" onClick={close}>×</button><div className="kicker">NUEVA EXPERIENCIA</div><h2>Dale forma a tu idea.</h2><p className="subtle">Elige el formato y personaliza lo que verá la gente.</p>
+    <form className="form" onSubmit={submit}><label>Tipo de experiencia<select value={kind} onChange={e => setKind(e.target.value)}>{kinds.map(k => <option key={k.id} value={k.id}>{k.name}</option>)}</select></label><div className="kind-hint">{current.detail}</div>
+      <label>Título<input required maxLength="90" value={title} onChange={e => setTitle(e.target.value)} placeholder="Ej. ¿Cuánto me conoces?" /></label><label>Descripción<textarea maxLength="240" value={description} onChange={e => setDescription(e.target.value)} placeholder="Explica brevemente de qué trata…" /></label>
+      <label>{kind === 'confession' ? 'Mensaje para quien participe' : 'Tu pregunta'}<input required maxLength="180" value={prompt} onChange={e => setPrompt(e.target.value)} placeholder={kind === 'confession' ? 'Escribe aquí lo que quieras compartir…' : 'Ej. ¿Cuál de estas dos fotos prefieres?'} /></label>
+      {needsOptions && <div className="options-editor"><b>{kind === 'comparison' ? 'Las dos imágenes' : 'Opciones de respuesta'}</b>{options.map((op, i) => <div className="option-edit" key={i}><input required value={op} onChange={e => setOptions(v => v.map((x, j) => j === i ? e.target.value : x))} placeholder={'Opción ' + (i + 1)}/>{kind === 'comparison' && <label className="file-mini">Añadir foto<input type="file" accept="image/*" onChange={e => setImageFiles(v => v.map((x, j) => j === i ? e.target.files?.[0] || null : x))}/></label>}</div>)}{options.length < 6 && kind !== 'comparison' && <button type="button" className="add-option" onClick={() => setOptions(v => [...v, ''])}>＋ Añadir otra opción</button>}</div>}
+      <label className="check-row"><input type="checkbox" checked={anonymous} onChange={e => setAnonymous(e.target.checked)}/> Permitir participación anónima</label><label className="check-row"><input type="checkbox" checked={publish} onChange={e => setPublish(e.target.checked)}/> Publicar al crear</label><p className="tiny-note">Comparte contenido respetuoso. Las confesiones se mostrarán solo en tu panel, no públicamente.</p><Notice error={error}/><Button disabled={busy}>{busy ? 'Creando…' : publish ? 'Crear y publicar ↗' : 'Guardar borrador'}</Button>
+    </form>
+  </section></div>;
+}
+
+function PublicProfile({ username, openAuth }) {
+  const [profile, setProfile] = useState(null);
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { let live = true; (async () => { const { data: p } = await supabase.from('profiles').select('username,display_name,bio,avatar_url,is_public').eq('username', username.toLowerCase()).maybeSingle(); if (!p?.is_public) { if (live) setLoading(false); return; } const { data: ex } = await supabase.from('experiences').select('id,slug,kind,title,description,created_at').eq('owner_id', (await supabase.from('profiles').select('id').eq('username', username.toLowerCase()).single()).data?.id).eq('status','published').eq('is_public',true).order('created_at',{ascending:false}); if (live) { setProfile(p); setItems(ex || []); setLoading(false); } })(); return () => { live = false; }; }, [username]);
+  if (loading) return <PublicShell><div className="panel">Cargando perfil…</div></PublicShell>;
+  if (!profile) return <PublicShell><div className="panel empty"><h2>Este perfil no está disponible.</h2><a href={BASE}>Volver al inicio</a></div></PublicShell>;
+  return <PublicShell><section className="public-profile panel">{profile.avatar_url ? <img className="public-avatar" src={profile.avatar_url} alt=""/> : <div className="public-avatar avatar-placeholder">{profile.display_name.slice(0,1)}</div>}<div className="kicker">PERFIL PÚBLICO</div><h1>{profile.display_name}</h1><p className="subtle">@{profile.username}</p>{profile.bio && <p className="public-bio">{profile.bio}</p>}</section><section className="public-list"><div className="kicker">SUS EXPERIENCIAS</div><h2>Participa y descubre.</h2>{items.length ? <div className="my-grid">{items.map(x => <a className="my-card public-card" href={'#/e/' + x.slug} key={x.id}><span className="kind-icon">{kinds.find(k => k.id === x.kind)?.icon}</span><h3>{x.title}</h3><p>{x.description}</p><b>Abrir experiencia ↗</b></a>)}</div> : <div className="panel empty"><p>Aún no hay experiencias publicadas.</p></div>}</section><JoinCTA openAuth={openAuth}/></PublicShell>;
+}
+
+function PublicExperience({ slug, openAuth }) {
+  const [item, setItem] = useState(null);
+  const [questions, setQuestions] = useState([]);
+  const [owner, setOwner] = useState(null);
+  const [answers, setAnswers] = useState({});
+  const [name, setName] = useState('');
+  const [anonymous, setAnonymous] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
+  useEffect(() => { let live = true; (async () => { const { data: ex } = await supabase.from('experiences').select('*').eq('slug', slug).eq('is_public',true).eq('status','published').maybeSingle(); if (!ex) { if (live) setItem(false); return; } const [{ data: qs }, { data: p }] = await Promise.all([supabase.from('experience_questions').select('*').eq('experience_id',ex.id).order('position'),supabase.from('profiles').select('username,display_name').eq('id',ex.owner_id).maybeSingle()]); if (live) { setItem(ex); setQuestions(qs || []); setOwner(p); } })(); return () => { live = false; }; }, [slug]);
+  async function submit(e) {
+    e.preventDefault(); setBusy(true); setError('');
+    try {
+      if (!supabase || !item) throw new Error('No se pudo conectar con esta experiencia.');
+      const missing = questions.find(q => !String(answers[q.id] || '').trim());
+      if (missing) throw new Error('Responde la pregunta antes de enviar.');
+      const { error: e1 } = await supabase.from('experience_entries').insert({ experience_id: item.id, respondent_name: anonymous ? null : name.trim(), is_anonymous: anonymous, answers });
+      if (e1) throw e1; setSuccess(true);
+    } catch (e1) { setError(e1.message); } finally { setBusy(false); }
+  }
+  if (item === null) return <PublicShell><div className="panel">Cargando experiencia…</div></PublicShell>;
+  if (item === false) return <PublicShell><div className="panel empty"><h2>Este enlace no está disponible.</h2><a href={BASE}>Volver al inicio</a></div></PublicShell>;
+  return <PublicShell><section className="experience-public panel"><div className="kicker">{kinds.find(k => k.id === item.kind)?.short.toUpperCase()}</div><h1>{item.title}</h1><p className="subtle">{item.description}</p>{owner && <a className="owner-link" href={'#/u/' + owner.username}>Creado por {owner.display_name} · @{owner.username}</a>}
+    {success ? <div className="success-screen"><span>✓</span><h2>¡Respuesta enviada!</h2><p>Gracias por participar. Tu respuesta llegó a su creador.</p></div> : <form className="form response-form" onSubmit={submit}>{questions.map(q => <div className="question-block" key={q.id}><h3>{q.prompt}</h3>{q.answer_type === 'text' ? <textarea required maxLength="1000" value={answers[q.id] || ''} onChange={e => setAnswers(v => ({...v,[q.id]:e.target.value}))} placeholder="Escribe tu mensaje…"/> : <div className="answer-options">{(q.options || []).map((op,i) => <label className={'answer-option ' + (answers[q.id] === op.label ? 'chosen' : '')} key={i}><input type="radio" name={q.id} checked={answers[q.id] === op.label} onChange={() => setAnswers(v => ({...v,[q.id]:op.label}))}/>{op.image_url && <img src={op.image_url} alt={op.label}/>}<span>{op.label}</span></label>)}</div>}</div>)}
+      <label className="check-row"><input type="checkbox" checked={anonymous} onChange={e => setAnonymous(e.target.checked)}/> Enviar de forma anónima</label>{!anonymous && <label>Tu nombre<input required value={name} onChange={e => setName(e.target.value)} maxLength="60" placeholder="Cómo quieres aparecer"/></label>}<Notice error={error}/><Button disabled={busy}>{busy ? 'Enviando…' : 'Enviar respuesta ↗'}</Button><p className="tiny-note">No necesitas crear una cuenta para participar. Comparte solo información que te sientas cómodo enviando.</p></form>}
+  </section><JoinCTA openAuth={openAuth}/></PublicShell>;
+}
+
+function PublicShell({ children }) { return <div className="public-shell"><header className="topbar wrap"><Brand/><a className="text-link" href={BASE}>Descubrir Interacción ↗</a></header><main className="public-main wrap">{children}</main><footer className="footer wrap"><Brand/><span>Hecho para conectar.</span><a href={BASE}>Crear mi espacio ↗</a></footer></div>; }
+function JoinCTA({ openAuth }) { return <section className="join-cta panel"><div><div className="kicker">¿TE GUSTARÍA TENER EL TUYO?</div><h2>Ahora crea tu propio espacio.</h2><p className="subtle">Diseña preguntas y experiencias para compartir con tus amigos.</p></div><Button onClick={openAuth}>Crear mi cuenta ↗</Button></section>; }
 
 export default App;
