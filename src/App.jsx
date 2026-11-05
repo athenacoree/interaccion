@@ -353,10 +353,15 @@ function Creator({ user, close, created }) {
       const questionRows = cleanPrompts.map((prompt, position) => ({
         experience_id: ex.id, position, prompt,
         answer_type: kind === 'confession' ? 'text' : kind === 'comparison' ? 'image_choice' : 'single_choice',
-        options: questionOptions, media: kind === 'know_me' ? { correct_option_index: Number(correctAnswers[position] || 0) } : []
+        options: questionOptions, media: []
       }));
-      const { error: qe } = await supabase.from('experience_questions').insert(questionRows);
+      const { data: savedQuestions, error: qe } = await supabase.from('experience_questions').insert(questionRows).select('id,position');
       if (qe) throw qe;
+      if (kind === 'know_me' && savedQuestions?.length) {
+        const keys = savedQuestions.map(q => ({ question_id: q.id, correct_option_index: Number(correctAnswers[q.position] || 0) }));
+        const { error: ke } = await supabase.from('experience_answer_keys').insert(keys);
+        if (ke) throw ke;
+      }
       questionsSaved = true;
       await created();
     } catch (e1) { if (createdId && !questionsSaved) await supabase.from('experiences').delete().eq('id', createdId); setError(e1.message || 'No se pudo crear.'); }
@@ -446,7 +451,7 @@ function PublicExperience({ slug, openAuth }) {
   const [success, setSuccess] = useState(false);
   const [score, setScore] = useState(null);
   const [allowAnonymous, setAllowAnonymous] = useState(true);
-  useEffect(() => { let live = true; (async () => { const { data: ex, error: exError } = await supabase.from('experiences').select('*').eq('slug', slug).eq('is_public',true).eq('status','published').maybeSingle(); if (exError || !ex) { if (live) setItem(false); return; } const [{ data: qs }, { data: p }] = await Promise.all([supabase.from('experience_questions').select('*').eq('experience_id',ex.id).order('position'),supabase.from('profiles').select('id,username,display_name').eq('id',ex.owner_id).maybeSingle()]); if (live) { setItem(ex); setQuestions(qs || []); setOwner(p); setAllowAnonymous(ex.settings?.allow_anonymous !== false); setAnonymous(ex.settings?.allow_anonymous !== false); trackActivity(ex.owner_id, ex.id, 'experience_view'); } })(); return () => { live = false; }; }, [slug]);
+  useEffect(() => { let live = true; (async () => { const { data: ex, error: exError } = await supabase.from('experiences').select('*').eq('slug', slug).eq('is_public',true).eq('status','published').maybeSingle(); if (exError || !ex) { if (live) setItem(false); return; } const [{ data: qs }, { data: p }] = await Promise.all([supabase.from('experience_questions').select('id,experience_id,position,prompt,answer_type,options').eq('experience_id',ex.id).order('position'),supabase.from('profiles').select('id,username,display_name').eq('id',ex.owner_id).maybeSingle()]); if (live) { setItem(ex); setQuestions(qs || []); setOwner(p); setAllowAnonymous(ex.settings?.allow_anonymous !== false); setAnonymous(ex.settings?.allow_anonymous !== false); trackActivity(ex.owner_id, ex.id, 'experience_view'); } })(); return () => { live = false; }; }, [slug]);
   async function submit(e) {
     e.preventDefault(); setBusy(true); setError('');
     try {
@@ -455,12 +460,14 @@ function PublicExperience({ slug, openAuth }) {
       if (missing) throw new Error('Responde la pregunta antes de enviar.');
       const isAnon = allowAnonymous ? anonymous : false;
       if (!isAnon && !name.trim()) throw new Error('Escribe el nombre que quieres mostrar.');
-      const { error: e1 } = await supabase.from('experience_entries').insert({ experience_id: item.id, respondent_name: isAnon ? null : name.trim(), is_anonymous: isAnon, answers });
+      const { data: result, error: e1 } = await supabase.rpc('submit_experience_entry', {
+        p_experience_id: item.id,
+        p_respondent_name: isAnon ? null : name.trim(),
+        p_is_anonymous: isAnon,
+        p_answers: answers
+      });
       if (e1) throw e1;
-      if (item.kind === 'know_me' && questions.length && questions.every(q => Number.isInteger(q.media?.correct_option_index) && q.options?.[q.media.correct_option_index])) {
-        const correct = questions.filter(q => q.options[q.media.correct_option_index].label === answers[q.id]).length;
-        setScore({ correct, total: questions.length });
-      }
+      if (item.kind === 'know_me' && result?.total) setScore({ correct: Number(result.correct || 0), total: Number(result.total) });
       await trackActivity(item.owner_id, item.id, 'experience_response'); setSuccess(true);
     } catch (e1) { setError(e1.message); } finally { setBusy(false); }
   }
