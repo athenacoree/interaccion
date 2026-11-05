@@ -132,3 +132,29 @@
 .leaderboard-meter{grid-column:2/-1;height:5px;overflow:hidden;border-radius:99px;background:#eff1f7}
 .leaderboard-meter i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#8190e8,#b2a0eb);transition:width .7s ease}
 @media(max-width:560px){.leaderboard-panel{padding:14px}.podium{gap:6px}.podium-person{padding:10px 3px}.podium-person>b{font-size:9px}.leaderboard-row{grid-template-columns:25px 34px minmax(0,1fr) auto;gap:7px;padding:8px}}
+
+
+/* Bandeja clara y participaciones personales */
+.participant-history{margin:0 0 32px}
+.participant-history .dash-title{margin-bottom:14px}
+.participant-history-list{display:grid;gap:14px}
+.participant-history-item{padding:15px;border:1px solid #e9ecf3;border-radius:14px;background:#fff}
+.participant-history-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.participant-history-head>div{display:grid;gap:5px;min-width:0}
+.participant-history-head b{font:800 13px Manrope;color:#30384d}
+.participant-history-head small{font-size:9px;color:#8c94a5}
+.participant-history-head a{flex:0 0 auto;color:#7180d7;font-size:10px;font-weight:700}
+.participant-history-item .entry-answers{margin-bottom:0}
+.receipt-panel{margin:18px 0;padding:16px;border:1px solid #dfe5f4;border-radius:15px;background:linear-gradient(145deg,#fff,#f7f8ff);text-align:left}
+.receipt-panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.receipt-panel-head>div{display:grid;gap:5px}
+.receipt-panel-head b{font:800 13px Manrope;color:#30384d}
+.receipt-panel-head button{border:0;background:none;color:#7180d7;font-size:10px;font-weight:700}
+.receipt-panel .entry-answers{margin-bottom:0}
+.receipt-confirmation{max-width:100%;margin:20px auto}
+.inbox-loading{padding:18px 0;text-align:center}
+@media(max-width:560px){
+  .participant-history-item{padding:12px}
+  .participant-history-head{align-items:flex-start}
+  .receipt-panel{padding:13px}
+}
