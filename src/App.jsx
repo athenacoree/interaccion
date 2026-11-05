@@ -143,6 +143,7 @@ function Dashboard({ user, signOut }) {
   const [selectedQuestions, setSelectedQuestions] = useState([]);
   const [selectedEntryIds, setSelectedEntryIds] = useState([]);
   const [entrySearch, setEntrySearch] = useState('');
+  const [entryFilter, setEntryFilter] = useState('all');
   const [selected, setSelected] = useState(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -171,7 +172,7 @@ function Dashboard({ user, signOut }) {
   }
   useEffect(() => { load(); }, [user.id]);
   async function openEntries(item) {
-    setSelected(item); setSelectedEntryIds([]); setEntrySearch('');
+    setSelected(item); setSelectedEntryIds([]); setEntrySearch(''); setEntryFilter('all');
     const [{ data, error: e }, { data: questions, error: qe }] = await Promise.all([
       supabase.from('experience_entries').select('*').eq('experience_id', item.id).order('created_at', { ascending: false }).limit(200),
       supabase.from('experience_questions').select('id,prompt,position').eq('experience_id', item.id).order('position')
@@ -232,6 +233,11 @@ function Dashboard({ user, signOut }) {
     const {error:e}=await supabase.from('experiences').update({title:clean,description:description.trim(),updated_at:new Date().toISOString()}).eq('id',item.id).eq('owner_id',user.id);
     if(e)setError(e.message);else{setSuccess('Título y descripción actualizados.');await load();}
   }
+  async function updateEntryMeta(entry, patch) {
+    const { error: e } = await supabase.from('experience_entries').update(patch).eq('id', entry.id);
+    if (e) setError(e.message);
+    else { setEntries(v => v.map(x => x.id === entry.id ? {...x,...patch} : x)); setSuccess(patch.is_favorite !== undefined ? (patch.is_favorite ? 'Mensaje guardado en favoritos.' : 'Mensaje quitado de favoritos.') : (patch.read_at ? 'Mensaje marcado como leído.' : 'Mensaje marcado como no leído.')); }
+  }
   async function removeEntry(id) {
     if (!confirm('¿Eliminar esta respuesta?')) return;
     const { error: e } = await supabase.from('experience_entries').delete().eq('id', id);
@@ -248,11 +254,11 @@ function Dashboard({ user, signOut }) {
       {loading ? <div className="panel">Cargando tus experiencias…</div> : items.length ? <div className="my-grid">{items.map(item => <article className="my-card" key={item.id}><div className="my-card-top"><span className={'kind-icon ' + item.kind}>{kinds.find(k => k.id === item.kind)?.icon}</span><span className={'status ' + item.status}>{item.status === 'published' ? 'Publicada' : item.status === 'paused' ? 'Pausada' : item.status === 'archived' ? 'Archivada' : 'Borrador'}</span></div><h3>{item.title}</h3><p>{item.description || kinds.find(k => k.id === item.kind)?.detail}</p><div className="game-metrics"><span>{activity.filter(x=>x.experience_id===item.id && x.event_type==='experience_view').length} aperturas</span><span>{activity.filter(x=>x.experience_id===item.id && x.event_type==='experience_response').length} respuestas</span><small>Últimos 30 días</small></div><div className="my-link">{publicUrl('e/' + item.slug)}</div><div className="my-card-actions"><button onClick={() => copyExperienceLink(item)}>Copiar enlace</button><button onClick={() => openEntries(item)}>Respuestas</button>{item.status === 'published' ? <button onClick={() => changeStatus(item,'paused')}>Pausar</button> : item.status === 'archived' ? null : <button onClick={() => changeStatus(item,'published')}>Publicar</button>}<button onClick={() => setEditingExperience(item)}>Editar</button><button onClick={() => duplicateExperience(item)}>Duplicar</button><button onClick={() => renameExperience(item)}>Título</button>{item.status !== 'archived' ? <button onClick={() => changeStatus(item,'archived')}>Archivar</button> : <button onClick={() => changeStatus(item,'draft')}>Restaurar</button>}<button className="danger-link" onClick={() => deleteExperience(item)}>Eliminar</button><a href={'#/e/' + item.slug} target="_blank" rel="noreferrer">Abrir ↗</a></div></article>)}</div> : <div className="empty panel"><span>✧</span><h3>Este espacio está esperando tu primera idea.</h3><p>Crea una experiencia y comparte el enlace con tus personas favoritas.</p><Button onClick={() => setShowCreator(true)}>Crear mi primera experiencia</Button></div>}
       {selected && <section className="panel responses">
         <div className="responses-head"><div><div className="kicker">BANDEJA DE RESPUESTAS</div><h2>{selected.title}</h2><p className="subtle">{entries.length} respuestas recibidas</p></div><button className="close-small" onClick={() => setSelected(null)}>Cerrar ×</button></div>
-        <div className="inbox-tools"><input value={entrySearch} onChange={e => setEntrySearch(e.target.value)} placeholder="Buscar por nombre o contenido…"/><div><button className="danger-link" disabled={!selectedEntryIds.length} onClick={removeSelectedEntries}>Eliminar seleccionadas ({selectedEntryIds.length})</button><button className="danger-link" disabled={!entries.length} onClick={clearEntries}>Vaciar bandeja</button></div></div>
-        {entries.length ? entries.filter(entry => (entry.respondent_name || '').toLowerCase().includes(entrySearch.toLowerCase()) || JSON.stringify(entry.answers || {}).toLowerCase().includes(entrySearch.toLowerCase())).map(entry => <article className="entry" key={entry.id}>
-          <div className="entry-head"><label className="entry-select"><input type="checkbox" checked={selectedEntryIds.includes(entry.id)} onChange={e => setSelectedEntryIds(v => e.target.checked ? [...v,entry.id] : v.filter(x => x !== entry.id))}/><b>{entry.is_anonymous ? 'Anónimo' : entry.respondent_name || 'Participante'}</b></label><small>{new Date(entry.created_at).toLocaleString()}</small></div>
+        <div className="inbox-tools"><input value={entrySearch} onChange={e => setEntrySearch(e.target.value)} placeholder="Buscar por nombre o contenido…"/><select className="entry-filter" value={entryFilter} onChange={e => setEntryFilter(e.target.value)}><option value="all">Todos los mensajes</option><option value="unread">No leídos</option><option value="favorites">Favoritos</option></select><div><button className="danger-link" disabled={!selectedEntryIds.length} onClick={removeSelectedEntries}>Eliminar seleccionadas ({selectedEntryIds.length})</button><button className="danger-link" disabled={!entries.length} onClick={clearEntries}>Vaciar bandeja</button></div></div>
+        {entries.length ? entries.filter(entry => ((entry.respondent_name || '').toLowerCase().includes(entrySearch.toLowerCase()) || JSON.stringify(entry.answers || {}).toLowerCase().includes(entrySearch.toLowerCase())) && (entryFilter==='all' || (entryFilter==='unread' && !entry.read_at) || (entryFilter==='favorites' && entry.is_favorite))).map(entry => <article className={'entry ' + (!entry.read_at ? 'entry-unread' : '')} key={entry.id}>
+          <div className="entry-head"><label className="entry-select"><input type="checkbox" checked={selectedEntryIds.includes(entry.id)} onChange={e => setSelectedEntryIds(v => e.target.checked ? [...v,entry.id] : v.filter(x => x !== entry.id))}/><b>{entry.is_anonymous ? 'Anónimo' : entry.respondent_name || 'Participante'}</b>{!entry.read_at && <span className="entry-new">NUEVO</span>}</label><small>{new Date(entry.created_at).toLocaleString()}</small></div>
           <div className="entry-answers">{Object.entries(entry.answers || {}).map(([qid,answer]) => <div className="entry-answer" key={qid}><small>{selectedQuestions.find(q => q.id === qid)?.prompt || 'Respuesta'}</small><p>{Array.isArray(answer) ? answer.join(', ') : String(answer)}</p></div>)}</div>
-          <button className="danger-link" onClick={() => removeEntry(entry.id)}>Eliminar respuesta</button>
+          <div className="entry-actions"><button onClick={() => updateEntryMeta(entry,{read_at:entry.read_at ? null : new Date().toISOString()})}>{entry.read_at ? 'Marcar no leído' : 'Marcar leído'}</button><button onClick={() => updateEntryMeta(entry,{is_favorite:!entry.is_favorite})}>{entry.is_favorite ? '★ Quitar favorito' : '☆ Favorito'}</button><button className="danger-link" onClick={() => removeEntry(entry.id)}>Eliminar</button></div>
         </article>) : <p className="subtle">Todavía no hay respuestas para esta experiencia.</p>}
       </section>}
     </main>
