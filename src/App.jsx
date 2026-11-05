@@ -291,7 +291,7 @@ function Dashboard({ user, signOut }) {
           <div className={'kind-icon ' + item.kind}>{kinds.find(k=>k.id===item.kind)?.icon || '✧'}</div>
           <div className="inbox-overview-info"><b>{item.title}</b><small>{item.total} respuestas · {item.unread} sin leer{item.last_response ? ' · Última: '+new Date(item.last_response).toLocaleString() : ''}</small></div>
           {Number(item.unread)>0 && <span className="inbox-unread-count">{item.unread} nuevas</span>}
-          <button type="button" onClick={()=>openEntries(item)}>Ver respuestas ↗</button>
+          <button type="button" onClick={()=>openEntries(item)}>Ver interacción ↗</button>
         </article>)}</div> : <p className="subtle">Todavía no has recibido respuestas. Cuando alguien participe, aparecerá aquí.</p>}
       </section>
       {profile && <section className="activity-panel panel"><div className="dash-title"><div><div className="kicker">ÚLTIMOS 30 DÍAS</div><h2>Actividad de tu espacio</h2></div><span>Datos aproximados</span></div><div className="activity-stats"><article><small>Visitas al perfil</small><b>{activity.filter(x=>x.event_type==='profile_view').length}</b></article><article><small>Visitantes únicos estimados</small><b>{new Set(activity.filter(x=>x.event_type==='profile_view').map(x=>x.visitor_key)).size}</b></article><article><small>Juegos abiertos</small><b>{activity.filter(x=>x.event_type==='experience_view').length}</b></article><article><small>Respuestas enviadas</small><b>{activity.filter(x=>x.event_type==='experience_response').length}</b></article></div><div className="recent-activity">{activity.slice(0,6).map((a,i)=><div className="recent-activity-row" key={i}><span>{a.event_type==='profile_view'?'Visita al perfil':a.event_type==='experience_view'?'Abrió '+(items.find(x=>x.id===a.experience_id)?.title||'una experiencia'):'Nueva respuesta en '+(items.find(x=>x.id===a.experience_id)?.title||'una experiencia')}</span><time>{new Date(a.created_at).toLocaleString()}</time></div>)}</div><p className="tiny-note">Se cuentan visitantes únicos estimados por navegador y día. Las respuestas se cuentan por envío. No se recopilan direcciones IP ni se identifica personalmente a quien visita.</p></section>}
@@ -300,19 +300,21 @@ function Dashboard({ user, signOut }) {
         {myEntriesLoading ? <p className="subtle">Cargando tus participaciones…</p> : myEntries.length ? <div className="participant-history-list">{myEntries.map(entry => <article className="participant-history-item" key={entry.id}>
           <div className="participant-history-head"><div><b>{entry.experience_title || 'Experiencia'}</b><small>{entry.respondent_name || 'Tu respuesta'} · {new Date(entry.created_at).toLocaleString()}</small></div><a href={'#/e/' + entry.experience_slug}>Abrir ↗</a></div>
           <div className="entry-answers">{(entry.answers || []).map(answer => <div className="entry-answer" key={answer.question_id}><small>{answer.prompt}</small><p>{answer.answer ?? '—'}</p></div>)}</div>
+          <ConversationPanel entryId={entry.id} mode="respondent"/>
         </article>)}</div> : <p className="subtle">Cuando participes en experiencias usando tu cuenta, tus respuestas aparecerán aquí.</p>}
       </section>
       <div className="dash-title"><div><div className="kicker">TU CONTENIDO</div><h2>Tus experiencias</h2></div><span>{items.length} creadas</span></div>
-      {loading ? <div className="panel">Cargando tus experiencias…</div> : items.length ? <div className="my-grid">{items.map(item => <article className="my-card" key={item.id}><div className="my-card-top"><span className={'kind-icon ' + item.kind}>{kinds.find(k => k.id === item.kind)?.icon}</span><span className={'status ' + item.status}>{item.status === 'published' ? 'Publicada' : item.status === 'paused' ? 'Pausada' : item.status === 'archived' ? 'Archivada' : 'Borrador'}</span></div><h3>{item.title}</h3><p>{item.description || kinds.find(k => k.id === item.kind)?.detail}</p><div className="game-metrics"><span>{activity.filter(x=>x.experience_id===item.id && x.event_type==='experience_view').length} aperturas</span><span>{activity.filter(x=>x.experience_id===item.id && x.event_type==='experience_response').length} respuestas</span><small>Últimos 30 días</small></div><div className="my-link">{publicUrl('e/' + item.slug)}</div><div className="my-card-actions"><button onClick={() => copyExperienceLink(item)}>Copiar enlace</button><button onClick={() => openEntries(item)}>Respuestas</button>{item.status === 'published' ? <button onClick={() => changeStatus(item,'paused')}>Pausar</button> : item.status === 'archived' ? null : <button onClick={() => changeStatus(item,'published')}>Publicar</button>}<button onClick={() => setEditingExperience(item)}>Editar</button><button onClick={() => duplicateExperience(item)}>Duplicar</button><button onClick={() => renameExperience(item)}>Título</button>{item.status !== 'archived' ? <button onClick={() => changeStatus(item,'archived')}>Archivar</button> : <button onClick={() => changeStatus(item,'draft')}>Restaurar</button>}<button className="danger-link" onClick={() => deleteExperience(item)}>Eliminar</button><a href={'#/e/' + item.slug} target="_blank" rel="noreferrer">Abrir ↗</a></div></article>)}</div> : <div className="empty panel"><span>✧</span><h3>Este espacio está esperando tu primera idea.</h3><p>Crea una experiencia y comparte el enlace con tus personas favoritas.</p><Button onClick={() => setShowCreator(true)}>Crear mi primera experiencia</Button></div>}
-      {selected && <section className="panel responses">
+      {loading ? <div className="panel">Cargando tus experiencias…</div> : items.length ? <div className="my-grid">{items.map(item => <article className="my-card" key={item.id}><div className="my-card-top"><span className={'kind-icon ' + item.kind}>{kinds.find(k => k.id === item.kind)?.icon}</span><span className={'status ' + item.status}>{item.status === 'published' ? 'Publicada' : item.status === 'paused' ? 'Pausada' : item.status === 'archived' ? 'Archivada' : 'Borrador'}</span></div><h3>{item.title}</h3><p>{item.description || kinds.find(k => k.id === item.kind)?.detail}</p><div className="game-metrics"><span>{activity.filter(x=>x.experience_id===item.id && x.event_type==='experience_view').length} aperturas</span><span>{activity.filter(x=>x.experience_id===item.id && x.event_type==='experience_response').length} respuestas</span><small>Últimos 30 días</small></div><div className="my-link">{publicUrl('e/' + item.slug)}</div><div className="my-card-actions"><button onClick={() => copyExperienceLink(item)}>Copiar enlace</button><button onClick={() => openEntries(item)}>Ver interacción</button>{item.status === 'published' ? <button onClick={() => changeStatus(item,'paused')}>Pausar</button> : item.status === 'archived' ? null : <button onClick={() => changeStatus(item,'published')}>Publicar</button>}<button onClick={() => setEditingExperience(item)}>Editar</button><button onClick={() => duplicateExperience(item)}>Duplicar</button><button onClick={() => renameExperience(item)}>Título</button>{item.status !== 'archived' ? <button onClick={() => changeStatus(item,'archived')}>Archivar</button> : <button onClick={() => changeStatus(item,'draft')}>Restaurar</button>}<button className="danger-link" onClick={() => deleteExperience(item)}>Eliminar</button><a href={'#/e/' + item.slug} target="_blank" rel="noreferrer">Abrir ↗</a></div></article>)}</div> : <div className="empty panel"><span>✧</span><h3>Este espacio está esperando tu primera idea.</h3><p>Crea una experiencia y comparte el enlace con tus personas favoritas.</p><Button onClick={() => setShowCreator(true)}>Crear mi primera experiencia</Button></div>}
+      {selected && <div className="inbox-modal-backdrop" onMouseDown={e => e.target === e.currentTarget && setSelected(null)}><section className="panel responses inbox-modal">
         <div className="responses-head"><div><div className="kicker">BANDEJA DE RESPUESTAS</div><h2>{selected.title}</h2><p className="subtle">{inboxSummary.find(x=>x.id===selected.id)?.total ?? entries.length} respuestas recibidas</p></div><button className="close-small" onClick={() => setSelected(null)}>Cerrar ×</button></div>
         <div className="inbox-tools"><input value={entrySearch} onChange={e => setEntrySearch(e.target.value)} placeholder="Buscar por nombre o contenido…"/><select className="entry-filter" value={entryFilter} onChange={e => setEntryFilter(e.target.value)}><option value="all">Todos los mensajes</option><option value="unread">No leídos</option><option value="favorites">Favoritos</option></select><div><button className="danger-link" disabled={!selectedEntryIds.length} onClick={removeSelectedEntries}>Eliminar seleccionadas ({selectedEntryIds.length})</button><button className="danger-link" disabled={!entries.length} onClick={clearEntries}>Vaciar bandeja</button></div></div>
         {entriesLoading ? <p className="subtle inbox-loading">Cargando respuestas…</p> : entries.length ? entries.filter(entry => ((entry.respondent_name || '').toLowerCase().includes(entrySearch.toLowerCase()) || JSON.stringify(entry.answers || {}).toLowerCase().includes(entrySearch.toLowerCase())) && (entryFilter==='all' || (entryFilter==='unread' && !entry.read_at) || (entryFilter==='favorites' && entry.is_favorite))).map(entry => <article className={'entry ' + (!entry.read_at ? 'entry-unread' : '')} key={entry.id}>
           <div className="entry-head"><label className="entry-select"><input type="checkbox" checked={selectedEntryIds.includes(entry.id)} onChange={e => setSelectedEntryIds(v => e.target.checked ? [...v,entry.id] : v.filter(x => x !== entry.id))}/><b>{entry.is_anonymous ? 'Anónimo' : entry.respondent_name || 'Participante'}</b>{!entry.read_at && <span className="entry-new">NUEVO</span>}</label><small>{new Date(entry.created_at).toLocaleString()}</small></div>
-          <div className="entry-answers">{Object.entries(entry.answers || {}).map(([qid,answer]) => <div className="entry-answer" key={qid}><small>{selectedQuestions.find(q => q.id === qid)?.prompt || 'Respuesta'}</small><p>{Array.isArray(answer) ? answer.join(', ') : String(answer)}</p></div>)}</div>
+          <div className="entry-answers">{selectedQuestions.map(q => <div className="entry-answer" key={q.id}><small>{q.prompt}</small><p>{entry.answers?.[q.id] == null ? '—' : Array.isArray(entry.answers[q.id]) ? entry.answers[q.id].join(', ') : String(entry.answers[q.id])}</p></div>)}</div>
           <div className="entry-actions"><button onClick={() => updateEntryMeta(entry,{read_at:entry.read_at ? null : new Date().toISOString()})}>{entry.read_at ? 'Marcar no leído' : 'Marcar leído'}</button><button onClick={() => updateEntryMeta(entry,{is_favorite:!entry.is_favorite})}>{entry.is_favorite ? '★ Quitar favorito' : '☆ Favorito'}</button><button className="danger-link" onClick={() => removeEntry(entry.id)}>Eliminar</button></div>
+          <ConversationPanel entryId={entry.id} mode="owner"/>
         </article>) : <p className="subtle">{entries.length ? 'No hay mensajes que coincidan con la búsqueda o el filtro.' : 'Todavía no hay respuestas para esta experiencia.'}</p>}
-      </section>}
+      </section></div>}
     </main>
     {showCreator && <Creator user={user} close={() => setShowCreator(false)} created={async () => { setShowCreator(false); setSuccess('Tu experiencia ya está creada.'); await load(); }}/>}\n    {editingExperience && <ExperienceEditor item={editingExperience} close={() => setEditingExperience(null)} saved={async () => {setEditingExperience(null);setSuccess('Experiencia actualizada.');await load();}}/>}
   </div>;
@@ -508,6 +510,57 @@ function ExperienceEditor({item,close,saved}) {
   return <div className="overlay"><section className="modal editor-modal"><button className="x" onClick={close}>×</button><div className="kicker">EDITAR EXPERIENCIA</div><h2>Actualiza tu juego.</h2>{loading?<p>Cargando preguntas…</p>:<form className="form" onSubmit={save}><label>Título<input value={title} maxLength="100" onChange={e=>setTitle(e.target.value)} required/></label><label>Descripción<textarea value={description} maxLength="240" onChange={e=>setDescription(e.target.value)}/></label>{questions.map((q,qi)=><div className="edit-question-card" key={q.id||'new-'+qi}><div className="edit-question-top"><b>Pregunta {qi+1}</b><button type="button" className="danger-link" onClick={()=>setQuestions(v=>v.filter((_,i)=>i!==qi))}>Quitar</button></div><input value={q.prompt} onChange={e=>updateQuestion(qi,{prompt:e.target.value})} placeholder="Escribe la pregunta"/>{item.kind!=='confession'&&<div className="edit-options">{(q.options||[]).map((op,oi)=><div className="edit-option" key={oi}><input value={op.label||''} onChange={e=>updateOption(qi,oi,{label:e.target.value})} placeholder={'Opción '+(oi+1)}/>{item.kind==='comparison'&&<input value={op.image_url||''} onChange={e=>updateOption(qi,oi,{image_url:e.target.value})} placeholder="URL de imagen"/>}<button type="button" className="danger-link" onClick={()=>removeOption(qi,oi)}>×</button></div>)}<button type="button" className="add-option" onClick={()=>updateQuestion(qi,{options:[...(q.options||[]),{label:'Nueva opción',image_url:null}]})}>＋ Añadir opción</button>{item.kind==='know_me'&&<label>Respuesta correcta<select value={q.media?.correct_option_index??0} onChange={e=>updateQuestion(qi,{media:{...(q.media||{}),correct_option_index:Number(e.target.value)}})}>{(q.options||[]).map((op,i)=><option value={i} key={i}>{op.label||'Opción '+(i+1)}</option>)}</select></label>}</div>}</div>)}<button type="button" className="add-option" onClick={addQuestion}>＋ Añadir pregunta</button><Notice error={error}/><Button disabled={busy}>{busy?'Guardando…':'Guardar cambios'}</Button></form>}</section></div>;
 }
 
+
+function ConversationPanel({ entryId, mode='respondent', receiptToken='' }) {
+  const [open,setOpen]=useState(false);
+  const [messages,setMessages]=useState([]);
+  const [draft,setDraft]=useState('');
+  const [loading,setLoading]=useState(false);
+  const [sending,setSending]=useState(false);
+  const [launching,setLaunching]=useState(false);
+  const [error,setError]=useState('');
+  async function refresh() {
+    setLoading(true); setError('');
+    const {data,error:e}=await supabase.rpc('get_entry_conversation',{p_entry_id:entryId,p_receipt_token:receiptToken || null});
+    if(e) setError(e.message);
+    else setMessages(Array.isArray(data?.messages)?data.messages:[]);
+    setLoading(false);
+  }
+  useEffect(()=>{if(open)refresh();},[open,entryId,receiptToken]);
+  async function send(e) {
+    e.preventDefault();
+    if(!draft.trim() || sending) return;
+    setSending(true);setLaunching(true);setError('');
+    const body=draft.trim();
+    const {error:e1}=await supabase.rpc('send_entry_message',{p_entry_id:entryId,p_body:body,p_receipt_token:receiptToken || null});
+    if(e1) setError(e1.message);
+    else {setDraft('');await refresh();}
+    setSending(false);
+    window.setTimeout(()=>setLaunching(false),850);
+  }
+  return <section className={'conversation-box '+(open?'conversation-open':'')}>
+    <button type="button" className="conversation-toggle" onClick={()=>setOpen(v=>!v)}>
+      <span className="conversation-toggle-icon">✉</span>
+      <span><b>{mode==='owner'?'Responder a esta persona':'Conversación con el creador'}</b><small>{open?'Toca para cerrar el chat':'Mensajes privados de esta participación'}</small></span>
+      <span className="conversation-chevron">{open?'⌃':'⌄'}</span>
+    </button>
+    {open && <div className="conversation-content">
+      <div className="conversation-note"><span className="conversation-online-dot"/>{mode==='owner'?'Este diálogo solo lo ven tú y quien participó.':'Aquí puedes leer las respuestas del creador y contestarle.'}</div>
+      <div className="conversation-messages">
+        {loading?<div className="conversation-empty">Cargando conversación…</div>:messages.length?messages.map(message=><article key={message.id} className={'chat-bubble '+(message.sender_role===mode?'chat-mine':'chat-theirs')}>
+          <small>{message.sender_name} · {new Date(message.created_at).toLocaleString()}</small><p>{message.body}</p>
+        </article>):<div className="conversation-empty"><span>✧</span><b>Aún no hay mensajes</b><small>Envía el primero para iniciar esta conversación.</small></div>}
+      </div>
+      <form className="conversation-composer" onSubmit={send}>
+        <textarea value={draft} onChange={e=>setDraft(e.target.value)} maxLength="2000" rows="1" placeholder="Escribe un mensaje privado…" />
+        <button type="submit" disabled={sending||!draft.trim()} aria-label="Enviar mensaje"><span className={launching?'send-plane send-plane-flight':'send-plane'}>➤</span></button>
+      </form>
+      <div className="conversation-footer"><span>Solo visible para quienes participan en esta interacción</span><span>{draft.length}/2000</span></div>
+      {error&&<p className="conversation-error">{error}</p>}
+    </div>}
+  </section>;
+}
+
 function PublicProfile({ username, openAuth }) {
   const [profile, setProfile] = useState(null);
   const [items, setItems] = useState([]);
@@ -532,6 +585,7 @@ function PublicExperience({ slug, openAuth, user }) {
   const [score, setScore] = useState(null);
   const [leaderboard, setLeaderboard] = useState([]);
   const [savedReceipt, setSavedReceipt] = useState(null);
+  const [receiptToken, setReceiptToken] = useState('');
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [allowAnonymous, setAllowAnonymous] = useState(true);
   const quizMode = item?.kind === 'know_me';
@@ -554,9 +608,10 @@ function PublicExperience({ slug, openAuth, user }) {
         setAllowAnonymous(ex.settings?.allow_anonymous !== false);
         setAnonymous(ex.settings?.allow_anonymous !== false);
         try {
-          const receiptToken = localStorage.getItem('interaccion:receipt:' + ex.id);
-          if (receiptToken) {
-            const { data: receipt } = await supabase.rpc('get_experience_entry_receipt', { p_receipt_token: receiptToken });
+          const savedToken = localStorage.getItem('interaccion:receipt:' + ex.id);
+          if (savedToken) {
+            setReceiptToken(savedToken);
+            const { data: receipt } = await supabase.rpc('get_experience_entry_receipt', { p_receipt_token: savedToken });
             if (live && receipt) setSavedReceipt(receipt);
           }
         } catch { /* El comprobante local es opcional; nunca bloquea la experiencia. */ }
@@ -594,6 +649,7 @@ function PublicExperience({ slug, openAuth, user }) {
         p_receipt_token: receiptToken
       });
       if (e1) throw e1;
+      setReceiptToken(receiptToken);
       try { localStorage.setItem('interaccion:receipt:' + item.id, receiptToken); } catch { /* La respuesta ya está guardada en el servidor. */ }
       const { data: receipt } = await supabase.rpc('get_experience_entry_receipt', { p_receipt_token: receiptToken });
       setSavedReceipt(receipt || {
@@ -626,10 +682,11 @@ function PublicExperience({ slug, openAuth, user }) {
       <div className="receipt-panel-head"><div><div className="kicker">COMPROBANTE PERSONAL</div><b>Ya participaste en esta experiencia</b></div><button type="button" onClick={() => setSavedReceipt(null)}>Ocultar</button></div>
       <div className="entry-answers">{(savedReceipt.answers || []).map(answer => <div className="entry-answer" key={answer.question_id}><small>{answer.prompt}</small><p>{answer.answer ?? '—'}</p></div>)}</div>
       <p className="tiny-note">Este comprobante se guarda en este navegador. Si borras sus datos o cambias de dispositivo, no estará disponible.</p>
+      {savedReceipt.id && <ConversationPanel entryId={savedReceipt.id} mode="respondent" receiptToken={receiptToken}/>}
     </section>}
     {success ? <div className="success-screen">
       <span>✓</span><h2>¡Participación guardada!</h2><p>Estas son las respuestas que enviaste. Puedes volver a consultarlas en este navegador.</p>
-      {savedReceipt && <section className="receipt-panel receipt-confirmation"><div className="kicker">TUS RESPUESTAS</div><div className="entry-answers">{(savedReceipt.answers || []).map(answer => <div className="entry-answer" key={answer.question_id}><small>{answer.prompt}</small><p>{answer.answer ?? '—'}</p></div>)}</div></section>}
+      {savedReceipt && <section className="receipt-panel receipt-confirmation"><div className="kicker">TUS RESPUESTAS</div><div className="entry-answers">{(savedReceipt.answers || []).map(answer => <div className="entry-answer" key={answer.question_id}><small>{answer.prompt}</small><p>{answer.answer ?? '—'}</p></div>)}</div>{savedReceipt.id && <ConversationPanel entryId={savedReceipt.id} mode="respondent" receiptToken={receiptToken}/>}</section>}
       {score && <div className="quiz-result">
         <div className="quiz-score"><b>{Math.round(score.correct * 100 / Math.max(1, score.total))}%</b><small>{score.correct} de {score.total} respuestas correctas</small><p>{score.correct === score.total ? '¡Perfecto! Conoces muy bien a esta persona.' : score.correct >= Math.ceil(score.total/2) ? '¡Muy bien! Has acertado varias.' : '¡Ya conoces un poco más sobre esta persona!'}</p></div>
         <section className="leaderboard-panel">
