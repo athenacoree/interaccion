@@ -541,11 +541,13 @@ function PublicExperience({ slug, openAuth, user }) {
         if (profileResult?.data?.display_name) setName(profileResult.data.display_name);
         setAllowAnonymous(ex.settings?.allow_anonymous !== false);
         setAnonymous(ex.settings?.allow_anonymous !== false);
-        const receiptToken = localStorage.getItem('interaccion:receipt:' + ex.id);
-        if (receiptToken) {
-          const { data: receipt } = await supabase.rpc('get_experience_entry_receipt', { p_receipt_token: receiptToken });
-          if (live && receipt) setSavedReceipt(receipt);
-        }
+        try {
+          const receiptToken = localStorage.getItem('interaccion:receipt:' + ex.id);
+          if (receiptToken) {
+            const { data: receipt } = await supabase.rpc('get_experience_entry_receipt', { p_receipt_token: receiptToken });
+            if (live && receipt) setSavedReceipt(receipt);
+          }
+        } catch { /* El comprobante local es opcional; nunca bloquea la experiencia. */ }
         trackActivity(ex.owner_id, ex.id, 'experience_view');
       }
     })();
@@ -580,7 +582,7 @@ function PublicExperience({ slug, openAuth, user }) {
         p_receipt_token: receiptToken
       });
       if (e1) throw e1;
-      localStorage.setItem('interaccion:receipt:' + item.id, receiptToken);
+      try { localStorage.setItem('interaccion:receipt:' + item.id, receiptToken); } catch { /* La respuesta ya está guardada en el servidor. */ }
       const { data: receipt } = await supabase.rpc('get_experience_entry_receipt', { p_receipt_token: receiptToken });
       setSavedReceipt(receipt || {
         experience_id: item.id, experience_title: item.title,
@@ -593,7 +595,7 @@ function PublicExperience({ slug, openAuth, user }) {
         if (boardError) throw boardError;
         setLeaderboard(Array.isArray(board) ? board : []);
       }
-      await trackActivity(item.owner_id, item.id, 'experience_response');
+      trackActivity(item.owner_id, item.id, 'experience_response');
       setSuccess(true);
     } catch (e1) { setError(e1.message || 'No se pudo enviar la respuesta.'); }
     finally { setBusy(false); }
