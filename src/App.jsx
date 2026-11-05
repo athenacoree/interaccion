@@ -79,10 +79,20 @@ function Dashboard({ user, onSignOut }) {
   useEffect(() => {
     let active = true;
     async function load() {
-      const [{ data: p }, { data: ex }] = await Promise.all([
-        supabase.from('profiles').select('username,display_name').eq('id', user.id).maybeSingle(),
-        supabase.from('experiences').select('id,slug,kind,title,status,is_public,created_at').eq('owner_id', user.id).order('created_at', { ascending: false })
-      ]);
+      let { data: p } = await supabase.from('profiles').select('username,display_name').eq('id', user.id).maybeSingle();
+      // If email confirmation delayed profile creation, finish it safely after the first authenticated sign-in.
+      if (!p) {
+        const metadata = user.user_metadata || {};
+        const username = String(metadata.username || '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 24);
+        const displayName = String(metadata.display_name || '').trim().slice(0, 60);
+        if (username.length >= 3 && displayName.length) {
+          const { data: created } = await supabase.from('profiles')
+            .insert({ id: user.id, username, display_name: displayName })
+            .select('username,display_name').maybeSingle();
+          p = created;
+        }
+      }
+      const { data: ex } = await supabase.from('experiences').select('id,slug,kind,title,status,is_public,created_at').eq('owner_id', user.id).order('created_at', { ascending: false });
       if (active) { setProfile(p); setItems(ex || []); setLoading(false); }
     }
     load();
