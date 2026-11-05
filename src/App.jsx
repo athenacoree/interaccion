@@ -607,9 +607,9 @@ function PublicExperience({ slug, openAuth, user }) {
       {!quizMode && allowAnonymous && <label className="check-row"><input type="checkbox" checked={anonymous} onChange={e => setAnonymous(e.target.checked)}/> Enviar de forma anónima</label>}
       {!quizMode && (!allowAnonymous || !anonymous) && <label>Tu nombre<input required value={name} onChange={e => setName(e.target.value)} maxLength="60" placeholder="Cómo quieres aparecer"/></label>}
       <Notice error={error}/>
-      {quizMode && currentQuestionIndex < questions.length - 1
-        ? <div className="quiz-nav">{currentQuestionIndex > 0 && <button type="button" className="quiz-back" onClick={() => {setCurrentQuestionIndex(i => i-1);setError('');}}>← Anterior</button>}<Button type="button" onClick={goNextQuestion}>Siguiente pregunta →</Button></div>
-        : <Button disabled={busy}>{busy ? 'Enviando…' : quizMode ? 'Terminar y ver ranking ↗' : 'Enviar respuesta ↗'}</Button>}
+      {quizMode
+        ? <div className="quiz-nav">{currentQuestionIndex > 0 && <button type="button" className="quiz-back" onClick={() => {setCurrentQuestionIndex(i => i-1);setError('');}}>← Anterior</button>}{currentQuestionIndex < questions.length - 1 ? <Button type="button" onClick={goNextQuestion}>Siguiente pregunta →</Button> : <Button disabled={busy}>{busy ? 'Enviando…' : 'Terminar y ver ranking ↗'}</Button>}</div>
+        : <Button disabled={busy}>{busy ? 'Enviando…' : 'Enviar respuesta ↗'}</Button>}
       <p className="tiny-note">No necesitas crear una cuenta para participar. Si tienes cuenta, el reto usará tu nombre y foto de perfil; si no, podrás participar con un nombre.</p>
     </form>}
   </section><JoinCTA openAuth={openAuth}/></PublicShell>;
