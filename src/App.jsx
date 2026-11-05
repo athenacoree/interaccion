@@ -49,6 +49,17 @@ function Brand() { return <a className="brand" href={BASE}><span className="bran
 function Button({ children, kind = 'primary', ...props }) { return <button className={'btn btn-' + kind} {...props}>{children}</button>; }
 function Notice({ error, success }) { return <>{error && <p className="notice error">{error}</p>}{success && <p className="notice success">{success}</p>}</>; }
 
+function ShareActions({ url, title = 'Interacción', compact = false }) {
+  const text = title + ' · Descúbrelo en Interacción';
+  async function nativeShare() {
+    if (navigator.share) {
+      try { await navigator.share({ title, text, url }); } catch (error) { if (error?.name !== 'AbortError') window.open('https://wa.me/?text=' + encodeURIComponent(text + ' ' + url), '_blank', 'noopener,noreferrer'); }
+    } else { window.open('https://wa.me/?text=' + encodeURIComponent(text + ' ' + url), '_blank', 'noopener,noreferrer'); }
+  }
+  async function copy() { try { await navigator.clipboard.writeText(url); alert('Enlace copiado.'); } catch { window.prompt('Copia este enlace:', url); } }
+  return <div className={compact ? 'share-actions share-actions-compact' : 'share-actions'}><button type="button" className="btn btn-primary" onClick={nativeShare}>Compartir ↗</button><a className="btn btn-soft" href={'https://wa.me/?text=' + encodeURIComponent(text + ' ' + url)} target="_blank" rel="noreferrer">WhatsApp</a><button type="button" className="btn btn-soft" onClick={copy}>Copiar enlace</button></div>;
+}
+
 function AuthDialog({ close, done }) {
   const [mode, setMode] = useState('signup');
   const [form, setForm] = useState({ name: '', username: '', email: '', password: '' });
@@ -587,7 +598,7 @@ function PublicProfile({ username, openAuth }) {
   useEffect(() => { let live = true; (async () => { const { data: p, error: pe } = await supabase.from('profiles').select('id,username,display_name,bio,avatar_url,is_public').eq('username', username.toLowerCase()).maybeSingle(); if (pe || !p?.is_public) { if (live) setLoading(false); return; } const { data: ex, error: ee } = await supabase.from('experiences').select('id,slug,kind,title,description,created_at').eq('owner_id', p.id).eq('status','published').eq('is_public',true).order('created_at',{ascending:false}); if (live) { setProfile(p); setItems(ex || []); setLoading(false); trackActivity(p.id, null, 'profile_view'); } })(); return () => { live = false; }; }, [username]);
   if (loading) return <PublicShell><div className="panel">Cargando perfil…</div></PublicShell>;
   if (!profile) return <PublicShell><div className="panel empty"><h2>Este perfil no está disponible.</h2><a href={BASE}>Volver al inicio</a></div></PublicShell>;
-  return <PublicShell><section className="public-profile panel">{profile.avatar_url ? <img className="public-avatar" src={profile.avatar_url} alt=""/> : <div className="public-avatar avatar-placeholder">{profile.display_name.slice(0,1)}</div>}<div className="kicker">PERFIL PÚBLICO</div><h1>{profile.display_name}</h1><p className="subtle">@{profile.username}</p>{profile.bio && <p className="public-bio">{profile.bio}</p>}</section><section className="public-list"><div className="kicker">SUS EXPERIENCIAS</div><h2>Participa y descubre.</h2>{items.length ? <div className="my-grid">{items.map(x => <a className="my-card public-card" href={'#/e/' + x.slug} key={x.id}><span className="kind-icon">{kinds.find(k => k.id === x.kind)?.icon}</span><h3>{x.title}</h3><p>{x.description}</p><b>Abrir experiencia ↗</b></a>)}</div> : <div className="panel empty"><p>Aún no hay experiencias publicadas.</p></div>}</section><JoinCTA openAuth={openAuth}/></PublicShell>;
+  return <PublicShell><section className="public-profile panel">{profile.avatar_url ? <img className="public-avatar" src={profile.avatar_url} alt=""/> : <div className="public-avatar avatar-placeholder">{profile.display_name.slice(0,1)}</div>}<div className="kicker">PERFIL PÚBLICO</div><h1>{profile.display_name}</h1><p className="subtle">@{profile.username}</p>{profile.bio && <p className="public-bio">{profile.bio}</p>}<ShareActions url={publicUrl('u/'+profile.username)} title={profile.display_name + ' · Perfil en Interacción'} /></section><section className="public-list"><div className="kicker">SUS EXPERIENCIAS</div><h2>Participa y descubre.</h2>{items.length ? <div className="my-grid">{items.map(x => <a className="my-card public-card" href={'#/e/' + x.slug} key={x.id}><span className="kind-icon">{kinds.find(k => k.id === x.kind)?.icon}</span><h3>{x.title}</h3><p>{x.description}</p><b>Abrir experiencia ↗</b></a>)}</div> : <div className="panel empty"><p>Aún no hay experiencias publicadas.</p></div>}</section><JoinCTA openAuth={openAuth}/></PublicShell>;
 }
 
 function PublicExperience({ slug, openAuth, user }) {
@@ -695,7 +706,7 @@ function PublicExperience({ slug, openAuth, user }) {
 
   return <PublicShell><section className="experience-public panel">
     <div className="kicker">{kinds.find(k => k.id === item.kind)?.short.toUpperCase()}</div>
-    <h1>{item.title}</h1><p className="subtle">{item.description}</p>
+    <h1>{item.title}</h1><p className="subtle">{item.description}</p><ShareActions url={publicUrl('e/'+item.slug)} title={item.title + ' · Interacción'} />
     {owner && <a className="owner-link" href={'#/u/' + owner.username}>Creado por {owner.display_name} · @{owner.username}</a>}
     {savedReceipt && !success && <section className="receipt-panel">
       <div className="receipt-panel-head"><div><div className="kicker">COMPROBANTE PERSONAL</div><b>Ya participaste en esta experiencia</b></div><button type="button" onClick={() => setSavedReceipt(null)}>Ocultar</button></div>
