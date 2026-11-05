@@ -238,13 +238,19 @@ function Dashboard({ user, signOut }) {
     if (e) setError(e.message);
     else { setEntries(v => v.map(x => x.id === entry.id ? {...x,...patch} : x)); setSuccess(patch.is_favorite !== undefined ? (patch.is_favorite ? 'Mensaje guardado en favoritos.' : 'Mensaje quitado de favoritos.') : (patch.read_at ? 'Mensaje marcado como leído.' : 'Mensaje marcado como no leído.')); }
   }
+  async function copyProfileLink() {
+    if (!profile?.username) return;
+    const url=publicUrl('u/'+profile.username);
+    try { await navigator.clipboard.writeText(url); setSuccess('Enlace de tu perfil copiado.'); }
+    catch { prompt('Copia el enlace de tu perfil:',url); }
+  }
   async function removeEntry(id) {
     if (!confirm('¿Eliminar esta respuesta?')) return;
     const { error: e } = await supabase.from('experience_entries').delete().eq('id', id);
     if (e) setError(e.message); else { setEntries(v => v.filter(x => x.id !== id)); setSelectedEntryIds(v => v.filter(x => x !== id)); setSuccess('Respuesta eliminada.'); }
   }
   return <div className="dashboard">
-    <header className="dashbar wrap"><Brand/><div className="dash-actions"><a href={profile?.username ? publicUrl('u/' + profile.username) : '#'} target="_blank" rel="noreferrer">Ver mi perfil ↗</a><Button kind="soft" onClick={signOut}>Salir</Button></div></header>
+    <header className="dashbar wrap"><Brand/><div className="dash-actions"><a href={profile?.username ? publicUrl('u/' + profile.username) : '#'} target="_blank" rel="noreferrer">Ver mi perfil ↗</a><Button kind="soft" disabled={!profile?.username} onClick={copyProfileLink}>Copiar enlace</Button><Button kind="soft" onClick={signOut}>Salir</Button></div></header>
     <main className="dash-main wrap"><div className="dash-intro"><div><div className="kicker">TU ESPACIO PERSONAL</div><h1>Hola, {profile?.display_name || 'bienvenido'}.</h1><p>Administra tus experiencias y mira lo que tu gente comparte contigo.</p></div><Button onClick={() => setShowCreator(true)}>＋ Crear experiencia</Button></div>
       <Notice error={error} success={success}/>
       {profile && <ProfileEditor profile={profile} user={user} onSaved={async p => { setProfile(p); setEditingProfile(false); setSuccess('Tu perfil se actualizó.'); }} editing={editingProfile} setEditing={setEditingProfile}/>}
