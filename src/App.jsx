@@ -424,7 +424,7 @@ function ExperienceEditor({item,close,saved}) {
     if(!title.trim())throw new Error('Escribe un título.');
     if(!questions.length)throw new Error('Añade al menos una pregunta.');
     if(questions.some(q=>!q.prompt.trim()))throw new Error('Todas las preguntas necesitan un texto.');
-    if(item.kind!=='confession'&&questions.some(q=>(q.options||[]).filter(o=>o.label?.trim()).length<2))throw new Error('Cada pregunta necesita al menos dos opciones.');
+    if(item.kind!=='confession'&&questions.some(q=>(q.options||[]).filter(o=>o.label?.trim()).length<2))throw new Error('Cada pregunta necesita al menos dos opciones.');if(item.kind==='know_me'&&questions.some(q=>Number(q.media?.correct_option_index??0)<0||Number(q.media?.correct_option_index??0)>=(q.options||[]).filter(o=>o.label?.trim()).length))throw new Error('Selecciona una respuesta correcta válida para cada pregunta.');
     const {error:ue}=await supabase.from('experiences').update({title:title.trim(),description:description.trim(),updated_at:new Date().toISOString()}).eq('id',item.id);
     if(ue)throw ue;
     const {data:existing,error:se}=await supabase.from('experience_questions').select('id').eq('experience_id',item.id);if(se)throw se;
