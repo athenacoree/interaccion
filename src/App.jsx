@@ -229,6 +229,11 @@ function Dashboard({ user, signOut }) {
     }
     setSuccess('Copia creada como borrador.'); await load();
   }
+  async function copyExperienceLink(item) {
+    const url=publicUrl('e/'+item.slug);
+    try { await navigator.clipboard.writeText(url); setSuccess('Enlace copiado. Ya puedes compartirlo.'); }
+    catch { prompt('Copia este enlace para compartirlo:',url); }
+  }
   async function renameExperience(item) {
     const title=prompt('Título de la experiencia',item.title); if(title===null)return;
     const clean=title.trim(); if(!clean){setError('El título no puede quedar vacío.');return;}
@@ -249,7 +254,7 @@ function Dashboard({ user, signOut }) {
       {!profile && !loading && <div className="panel"><h3>Completa tu perfil</h3><p className="subtle">No pudimos encontrar el perfil asociado a esta cuenta. Revisa el identificador y vuelve a intentarlo.</p><Button kind="soft" onClick={load}>Volver a cargar</Button></div>}
       {profile && <section className="activity-panel panel"><div className="dash-title"><div><div className="kicker">ÚLTIMOS 30 DÍAS</div><h2>Actividad de tu espacio</h2></div><span>Datos aproximados</span></div><div className="activity-stats"><article><small>Visitas al perfil</small><b>{activity.filter(x=>x.event_type==='profile_view').length}</b></article><article><small>Juegos abiertos</small><b>{activity.filter(x=>x.event_type==='experience_view').length}</b></article><article><small>Respuestas enviadas</small><b>{activity.filter(x=>x.event_type==='experience_response').length}</b></article></div><div className="recent-activity">{activity.slice(0,6).map((a,i)=><div className="recent-activity-row" key={i}><span>{a.event_type==='profile_view'?'Visita al perfil':a.event_type==='experience_view'?'Abrió '+(items.find(x=>x.id===a.experience_id)?.title||'una experiencia'):'Nueva respuesta en '+(items.find(x=>x.id===a.experience_id)?.title||'una experiencia')}</span><time>{new Date(a.created_at).toLocaleString()}</time></div>)}</div><p className="tiny-note">Se cuentan visitantes únicos estimados por navegador y día. Las respuestas se cuentan por envío. No se recopilan direcciones IP ni se identifica personalmente a quien visita.</p></section>}
       <div className="dash-title"><div><div className="kicker">TU CONTENIDO</div><h2>Tus experiencias</h2></div><span>{items.length} creadas</span></div>
-      {loading ? <div className="panel">Cargando tus experiencias…</div> : items.length ? <div className="my-grid">{items.map(item => <article className="my-card" key={item.id}><div className="my-card-top"><span className={'kind-icon ' + item.kind}>{kinds.find(k => k.id === item.kind)?.icon}</span><span className={'status ' + item.status}>{item.status === 'published' ? 'Publicada' : item.status === 'paused' ? 'Pausada' : item.status === 'archived' ? 'Archivada' : 'Borrador'}</span></div><h3>{item.title}</h3><p>{item.description || kinds.find(k => k.id === item.kind)?.detail}</p><div className="game-metrics"><span>{activity.filter(x=>x.experience_id===item.id && x.event_type==='experience_view').length} aperturas</span><span>{activity.filter(x=>x.experience_id===item.id && x.event_type==='experience_response').length} respuestas</span><small>Últimos 30 días</small></div><div className="my-link">{publicUrl('e/' + item.slug)}</div><div className="my-card-actions"><button onClick={() => openEntries(item)}>Respuestas</button>{item.status === 'published' ? <button onClick={() => changeStatus(item,'paused')}>Pausar</button> : item.status === 'archived' ? null : <button onClick={() => changeStatus(item,'published')}>Publicar</button>}<button onClick={() => setEditingExperience(item)}>Editar</button><button onClick={() => duplicateExperience(item)}>Duplicar</button><button onClick={() => renameExperience(item)}>Título</button>{item.status !== 'archived' ? <button onClick={() => changeStatus(item,'archived')}>Archivar</button> : <button onClick={() => changeStatus(item,'draft')}>Restaurar</button>}<button className="danger-link" onClick={() => deleteExperience(item)}>Eliminar</button><a href={'#/e/' + item.slug} target="_blank" rel="noreferrer">Abrir ↗</a></div></article>)}</div> : <div className="empty panel"><span>✧</span><h3>Este espacio está esperando tu primera idea.</h3><p>Crea una experiencia y comparte el enlace con tus personas favoritas.</p><Button onClick={() => setShowCreator(true)}>Crear mi primera experiencia</Button></div>}
+      {loading ? <div className="panel">Cargando tus experiencias…</div> : items.length ? <div className="my-grid">{items.map(item => <article className="my-card" key={item.id}><div className="my-card-top"><span className={'kind-icon ' + item.kind}>{kinds.find(k => k.id === item.kind)?.icon}</span><span className={'status ' + item.status}>{item.status === 'published' ? 'Publicada' : item.status === 'paused' ? 'Pausada' : item.status === 'archived' ? 'Archivada' : 'Borrador'}</span></div><h3>{item.title}</h3><p>{item.description || kinds.find(k => k.id === item.kind)?.detail}</p><div className="game-metrics"><span>{activity.filter(x=>x.experience_id===item.id && x.event_type==='experience_view').length} aperturas</span><span>{activity.filter(x=>x.experience_id===item.id && x.event_type==='experience_response').length} respuestas</span><small>Últimos 30 días</small></div><div className="my-link">{publicUrl('e/' + item.slug)}</div><div className="my-card-actions"><button onClick={() => copyExperienceLink(item)}>Copiar enlace</button><button onClick={() => openEntries(item)}>Respuestas</button>{item.status === 'published' ? <button onClick={() => changeStatus(item,'paused')}>Pausar</button> : item.status === 'archived' ? null : <button onClick={() => changeStatus(item,'published')}>Publicar</button>}<button onClick={() => setEditingExperience(item)}>Editar</button><button onClick={() => duplicateExperience(item)}>Duplicar</button><button onClick={() => renameExperience(item)}>Título</button>{item.status !== 'archived' ? <button onClick={() => changeStatus(item,'archived')}>Archivar</button> : <button onClick={() => changeStatus(item,'draft')}>Restaurar</button>}<button className="danger-link" onClick={() => deleteExperience(item)}>Eliminar</button><a href={'#/e/' + item.slug} target="_blank" rel="noreferrer">Abrir ↗</a></div></article>)}</div> : <div className="empty panel"><span>✧</span><h3>Este espacio está esperando tu primera idea.</h3><p>Crea una experiencia y comparte el enlace con tus personas favoritas.</p><Button onClick={() => setShowCreator(true)}>Crear mi primera experiencia</Button></div>}
       {selected && <section className="panel responses">
         <div className="responses-head"><div><div className="kicker">BANDEJA DE RESPUESTAS</div><h2>{selected.title}</h2><p className="subtle">{entries.length} respuestas recibidas</p></div><button className="close-small" onClick={() => setSelected(null)}>Cerrar ×</button></div>
         <div className="inbox-tools"><input value={entrySearch} onChange={e => setEntrySearch(e.target.value)} placeholder="Buscar por nombre o contenido…"/><div><button className="danger-link" disabled={!selectedEntryIds.length} onClick={removeSelectedEntries}>Eliminar seleccionadas ({selectedEntryIds.length})</button><button className="danger-link" disabled={!entries.length} onClick={clearEntries}>Vaciar bandeja</button></div></div>
@@ -336,6 +341,7 @@ function Creator({ user, close, created }) {
   }
   async function submit(e) {
     e.preventDefault(); setBusy(true); setError('');
+    let createdId = null; let questionsSaved = false;
     try {
       const cleanTitle = title.trim();
       if (!cleanTitle) throw new Error('Escribe un título para tu juego.');
@@ -350,6 +356,7 @@ function Creator({ user, close, created }) {
         settings: { allow_anonymous: anonymous, template: template === -1 ? 'custom' : String(template) }
       }).select().single();
       if (ee) throw ee;
+      createdId = ex.id;
       let questionOptions = [];
       if (needsOptions) {
         for (let i = 0; i < options.length; i++) {
@@ -365,8 +372,9 @@ function Creator({ user, close, created }) {
       }));
       const { error: qe } = await supabase.from('experience_questions').insert(questionRows);
       if (qe) throw qe;
+      questionsSaved = true;
       await created();
-    } catch (e1) { setError(e1.message || 'No se pudo crear.'); }
+    } catch (e1) { if (createdId && !questionsSaved) await supabase.from('experiences').delete().eq('id', createdId); setError(e1.message || 'No se pudo crear.'); }
     finally { setBusy(false); }
   }
 
