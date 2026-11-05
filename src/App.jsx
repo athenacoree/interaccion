@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://wlbnulfixkfmvcifvpum.supabase.co';
+const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_rs8AM2PluCPJD1P4fhBznw_SrZSDh4F';
 const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 const BASE = import.meta.env.BASE_URL || '/';
 const SOCIAL_IMAGE = 'https://commons.wikimedia.org/wiki/Special:FilePath/TheStarryNightByVincentVanGogh.jpg';
@@ -191,7 +191,7 @@ function Creator({ user, close, created }) {
   const [kind, setKind] = useState('know_me');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [prompt, setPrompt] = useState('');
+  const [prompts, setPrompts] = useState(['']);
   const [options, setOptions] = useState(['Opción 1', 'Opción 2']);
   const [imageFiles, setImageFiles] = useState([null, null]);
   const [anonymous, setAnonymous] = useState(true);
@@ -213,7 +213,8 @@ function Creator({ user, close, created }) {
         questionOptions = [];
         for (let i = 0; i < options.length; i++) questionOptions.push({ label: options[i].trim(), image_url: imageFiles[i] ? await uploadImage(imageFiles[i], user.id) : null });
       }
-      const { error: qe } = await supabase.from('experience_questions').insert({ experience_id: ex.id, position: 0, prompt: prompt.trim(), answer_type: kind === 'confession' ? 'text' : kind === 'comparison' ? 'image_choice' : 'single_choice', options: questionOptions, media: [] });
+      const questionRows = prompts.map((text, position) => ({ experience_id: ex.id, position, prompt: text.trim(), answer_type: kind === 'confession' ? 'text' : kind === 'comparison' ? 'image_choice' : 'single_choice', options: questionOptions, media: [] }));
+      const { error: qe } = await supabase.from('experience_questions').insert(questionRows);
       if (qe) throw qe;
       await created();
     } catch (e1) { setError(e1.message || 'No se pudo crear.'); } finally { setBusy(false); }
@@ -221,7 +222,9 @@ function Creator({ user, close, created }) {
   return <div className="overlay"><section className="modal creator-modal"><button className="x" onClick={close}>×</button><div className="kicker">NUEVA EXPERIENCIA</div><h2>Dale forma a tu idea.</h2><p className="subtle">Elige el formato y personaliza lo que verá la gente.</p>
     <form className="form" onSubmit={submit}><label>Tipo de experiencia<select value={kind} onChange={e => setKind(e.target.value)}>{kinds.map(k => <option key={k.id} value={k.id}>{k.name}</option>)}</select></label><div className="kind-hint">{current.detail}</div>
       <label>Título<input required maxLength="90" value={title} onChange={e => setTitle(e.target.value)} placeholder="Ej. ¿Cuánto me conoces?" /></label><label>Descripción<textarea maxLength="240" value={description} onChange={e => setDescription(e.target.value)} placeholder="Explica brevemente de qué trata…" /></label>
-      <label>{kind === 'confession' ? 'Mensaje para quien participe' : 'Tu pregunta'}<input required maxLength="180" value={prompt} onChange={e => setPrompt(e.target.value)} placeholder={kind === 'confession' ? 'Escribe aquí lo que quieras compartir…' : 'Ej. ¿Cuál de estas dos fotos prefieres?'} /></label>
+      <label>{kind === 'confession' ? 'Mensaje para quien participe' : kind === 'comparison' ? 'Pregunta para votar' : 'Preguntas del reto'}
+      {prompts.map((value, index) => <div className="question-edit" key={index}><input required maxLength="180" value={value} onChange={e => setPrompts(v => v.map((x, i) => i === index ? e.target.value : x))} placeholder={kind === 'confession' ? 'Escribe aquí lo que quieras compartir…' : kind === 'comparison' ? 'Ej. ¿Cuál de estas dos fotos prefieres?' : 'Pregunta ' + (index + 1)} />{prompts.length > 1 && kind === 'know_me' && <button type="button" className="remove-question" onClick={() => setPrompts(v => v.filter((_, i) => i !== index))}>Quitar</button>}</div>)}
+      {kind === 'know_me' && prompts.length < 15 && <button type="button" className="add-option" onClick={() => setPrompts(v => [...v, ''])}>＋ Añadir otra pregunta</button>}</label>
       {needsOptions && <div className="options-editor"><b>{kind === 'comparison' ? 'Las dos imágenes' : 'Opciones de respuesta'}</b>{options.map((op, i) => <div className="option-edit" key={i}><input required value={op} onChange={e => setOptions(v => v.map((x, j) => j === i ? e.target.value : x))} placeholder={'Opción ' + (i + 1)}/>{kind === 'comparison' && <label className="file-mini">Añadir foto<input type="file" accept="image/*" onChange={e => setImageFiles(v => v.map((x, j) => j === i ? e.target.files?.[0] || null : x))}/></label>}</div>)}{options.length < 6 && kind !== 'comparison' && <button type="button" className="add-option" onClick={() => setOptions(v => [...v, ''])}>＋ Añadir otra opción</button>}</div>}
       <label className="check-row"><input type="checkbox" checked={anonymous} onChange={e => setAnonymous(e.target.checked)}/> Permitir participación anónima</label><label className="check-row"><input type="checkbox" checked={publish} onChange={e => setPublish(e.target.checked)}/> Publicar al crear</label><p className="tiny-note">Comparte contenido respetuoso. Las confesiones se mostrarán solo en tu panel, no públicamente.</p><Notice error={error}/><Button disabled={busy}>{busy ? 'Creando…' : publish ? 'Crear y publicar ↗' : 'Guardar borrador'}</Button>
     </form>
