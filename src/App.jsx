@@ -123,7 +123,7 @@ function App() {
   async function signOut() { await supabase?.auth.signOut(); setUser(null); location.hash = ''; }
   if (!ready) return <div className="boot"><span className="brand-icon">i</span><p>Preparando tu espacio…</p></div>;
   if (page.type === 'u' && page.value) return <><PublicProfile username={page.value} openAuth={() => setAuthOpen(true)} />{authOpen && <AuthDialog close={() => setAuthOpen(false)} done={u => { setUser(u); setAuthOpen(false); location.hash = ''; }}/>}</>;
-  if (page.type === 'e' && page.value) return <><PublicExperience slug={page.value} openAuth={() => setAuthOpen(true)} />{authOpen && <AuthDialog close={() => setAuthOpen(false)} done={u => { setUser(u); setAuthOpen(false); location.hash = ''; }}/>}</>;
+  if (page.type === 'e' && page.value) return <><PublicExperience slug={page.value} openAuth={() => setAuthOpen(true)} user={user} />{authOpen && <AuthDialog close={() => setAuthOpen(false)} done={u => { setUser(u); setAuthOpen(false); location.hash = ''; }}/>}</>;
   if (user) return <Dashboard user={user} signOut={signOut} />;
   return <Landing openAuth={() => setAuthOpen(true)} authOpen={authOpen} closeAuth={() => setAuthOpen(false)} onSignedIn={u => { setUser(u); setAuthOpen(false); }} />;
 }
@@ -336,6 +336,7 @@ function Creator({ user, close, created }) {
   const [description, setDescription] = useState('');
   const [prompts, setPrompts] = useState(['']);
   const [correctAnswers, setCorrectAnswers] = useState([0]);
+  const [questionOptions, setQuestionOptions] = useState([['Opción 1', 'Opción 2']]);
   const [options, setOptions] = useState(['Opción 1', 'Opción 2']);
   const [imageFiles, setImageFiles] = useState([null, null]);
   const [anonymous, setAnonymous] = useState(true);
@@ -347,15 +348,17 @@ function Creator({ user, close, created }) {
 
   function chooseKind(id) {
     setKind(id); setTemplate(-1); setTitle(''); setDescription('');
-    setPrompts(['']); setCorrectAnswers([0]); setOptions(['Opción 1', 'Opción 2']); setImageFiles([null, null]);
+    setPrompts(['']); setCorrectAnswers([0]); setQuestionOptions([['Opción 1', 'Opción 2']]); setOptions(['Opción 1', 'Opción 2']); setImageFiles([null, null]);
     setStep(2); setError('');
   }
   function chooseTemplate(index) {
     setTemplate(index);
-    if (index === -1) { setTitle(''); setPrompts(['']); setCorrectAnswers([0]); }
-    else {
+    if (index === -1) {
+      setTitle(''); setPrompts(['']); setCorrectAnswers([0]); setQuestionOptions([['Opción 1', 'Opción 2']]);
+    } else {
       const preset = creatorTemplates[kind][index];
       setTitle(preset.title); setPrompts(preset.prompts); setCorrectAnswers(preset.prompts.map(()=>0));
+      setQuestionOptions(preset.prompts.map(()=>['Opción 1', 'Opción 2']));
     }
     setStep(3);
   }
@@ -365,30 +368,34 @@ function Creator({ user, close, created }) {
     try {
       const cleanTitle = title.trim();
       if (!cleanTitle) throw new Error('Escribe un título para tu juego.');
-      const cleanPrompts = prompts.map(x => x.trim()).filter(Boolean);
-      if (!cleanPrompts.length) throw new Error('Añade al menos una pregunta.');
+      if (!prompts.length || prompts.some(x => !x.trim())) throw new Error('Completa todas las preguntas antes de continuar.');
+      const cleanPrompts = prompts.map(x => x.trim());
       if (kind === 'comparison' && imageFiles.filter(Boolean).length < 2) throw new Error('Añade las dos imágenes para crear la comparativa.');
-      if (needsOptions && (options.filter(x => x.trim()).length < 2 || options.some(x => !x.trim()))) throw new Error('Completa todas las opciones y añade al menos dos.');
+      if (kind === 'comparison' && (options.filter(x => x.trim()).length < 2 || options.some(x => !x.trim()))) throw new Error('Completa todas las opciones y añade al menos dos.');
+      if (kind === 'know_me' && questionOptions.some((list, i) => !list || list.length < 2 || list.some(x => !x.trim()) || correctAnswers[i] < 0 || correctAnswers[i] >= list.length)) throw new Error('Cada pregunta necesita al menos dos opciones y una respuesta correcta válida.');
       const slug = makeSlug(cleanTitle) + '-' + crypto.randomUUID().slice(0, 6);
       const { data: ex, error: ee } = await supabase.from('experiences').insert({
         owner_id: user.id, slug, kind, title: cleanTitle, description: description.trim(),
         status: publish ? 'published' : 'draft', is_public: true,
-        settings: { allow_anonymous: anonymous, template: template === -1 ? 'custom' : String(template) }
+        settings: { allow_anonymous: kind === 'know_me' ? false : anonymous, template: template === -1 ? 'custom' : String(template) }
       }).select().single();
       if (ee) throw ee;
       createdId = ex.id;
-      let questionOptions = [];
-      if (needsOptions) {
+      let comparisonOptions = [];
+      if (kind === 'comparison') {
         for (let i = 0; i < options.length; i++) {
           const label = options[i].trim();
           if (!label) continue;
-          questionOptions.push({ label, image_url: imageFiles[i] ? await uploadImage(imageFiles[i], user.id) : null });
+          comparisonOptions.push({ label, image_url: imageFiles[i] ? await uploadImage(imageFiles[i], user.id) : null });
         }
       }
       const questionRows = cleanPrompts.map((prompt, position) => ({
         experience_id: ex.id, position, prompt,
         answer_type: kind === 'confession' ? 'text' : kind === 'comparison' ? 'image_choice' : 'single_choice',
-        options: questionOptions, media: []
+        options: kind === 'know_me'
+          ? questionOptions[position].map(label => ({ label: label.trim(), image_url: null }))
+          : kind === 'comparison' ? comparisonOptions : [],
+        media: []
       }));
       const { data: savedQuestions, error: qe } = await supabase.from('experience_questions').insert(questionRows).select('id,position');
       if (qe) throw qe;
@@ -422,11 +429,17 @@ function Creator({ user, close, created }) {
         <label>Título del juego<input required maxLength="90" value={title} onChange={e => setTitle(e.target.value)} placeholder={kind === 'comparison' ? 'Ej. ¿Qué imagen prefieres?' : kind === 'confession' ? 'Ej. Déjame una confesión' : 'Ej. ¿Qué tanto me conoces?'}/></label>
         <label>Descripción<textarea maxLength="240" value={description} onChange={e => setDescription(e.target.value)} placeholder="Explica brevemente de qué trata…"/></label>
         <div className="field-group"><span className="field-title">{kind === 'confession' ? 'Mensaje que verá quien participe' : kind === 'comparison' ? 'Pregunta para votar' : 'Preguntas del juego'}</span>
-          {prompts.map((value,index) => <div className="question-edit" key={index}><input required maxLength="180" value={value} onChange={e => setPrompts(v => v.map((x,i) => i === index ? e.target.value : x))} placeholder={kind === 'confession' ? 'Escribe aquí lo que quieras compartir…' : kind === 'comparison' ? 'Ej. ¿Cuál de estas opciones prefieres?' : 'Pregunta ' + (index+1)}/>{prompts.length > 1 && kind === 'know_me' && <button type="button" className="remove-question" onClick={() => {setPrompts(v => v.filter((_,i) => i !== index));setCorrectAnswers(v => v.filter((_,i) => i !== index));}}>Quitar</button>}</div>)}
-          {kind === 'know_me' && prompts.map((prompt,index) => <label className="correct-answer-select" key={'correct-'+index}>Respuesta correcta · Pregunta {index+1}<select value={correctAnswers[index] ?? 0} onChange={e => setCorrectAnswers(v => v.map((x,i) => i === index ? Number(e.target.value) : x))}>{options.map((option,i) => <option key={i} value={i}>{option || 'Opción '+(i+1)}</option>)}</select></label>)}
-          {kind === 'know_me' && prompts.length < 15 && <button type="button" className="add-option" onClick={() => {setPrompts(v => [...v,'']);setCorrectAnswers(v => [...v,0]);}}>＋ Añadir pregunta</button>}
+          {kind === 'know_me' ? prompts.map((value,index) => <div className="quiz-question-editor" key={index}>
+            <div className="quiz-question-heading"><b>Pregunta {index+1}</b>{prompts.length > 1 && <button type="button" className="remove-question" onClick={() => {setPrompts(v => v.filter((_,i) => i !== index));setCorrectAnswers(v => v.filter((_,i) => i !== index));setQuestionOptions(v => v.filter((_,i) => i !== index));}}>Quitar</button>}</div>
+            <input required maxLength="180" value={value} onChange={e => setPrompts(v => v.map((x,i) => i === index ? e.target.value : x))} placeholder="Ej. ¿Cuál es mi comida favorita?"/>
+            <div className="quiz-options-editor"><span>Respuestas posibles</span>{(questionOptions[index] || []).map((option,oi) => <div className="option-edit" key={oi}><input required maxLength="100" value={option} onChange={e => setQuestionOptions(v => v.map((list,qi) => qi === index ? list.map((x,j) => j === oi ? e.target.value : x) : list))} placeholder={'Respuesta '+(oi+1)}/><button type="button" className="remove-question" onClick={() => setQuestionOptions(v => v.map((list,qi) => qi === index ? list.filter((_,j) => j !== oi) : list))}>Quitar</button></div>)}
+              {(questionOptions[index] || []).length < 8 && <button type="button" className="add-option" onClick={() => setQuestionOptions(v => v.map((list,qi) => qi === index ? [...list,''] : list))}>＋ Añadir respuesta</button>}
+            </div>
+            <label className="correct-answer-select">Respuesta correcta<select value={correctAnswers[index] ?? 0} onChange={e => setCorrectAnswers(v => v.map((x,i) => i === index ? Number(e.target.value) : x))}>{(questionOptions[index] || []).map((option,i) => <option key={i} value={i}>{option || 'Opción '+(i+1)}</option>)}</select></label>
+          </div>) : prompts.map((value,index) => <div className="question-edit" key={index}><input required maxLength="180" value={value} onChange={e => setPrompts(v => v.map((x,i) => i === index ? e.target.value : x))} placeholder={kind === 'confession' ? 'Escribe aquí lo que quieras compartir…' : 'Ej. ¿Cuál de estas opciones prefieres?'}/></div>)}
+          {kind === 'know_me' && prompts.length < 15 && <button type="button" className="add-option" onClick={() => {setPrompts(v => [...v,'']);setCorrectAnswers(v => [...v,0]);setQuestionOptions(v => [...v,['Opción 1','Opción 2']]);}}>＋ Añadir pregunta</button>}
         </div>
-        {needsOptions && <div className="options-editor"><b>{kind === 'comparison' ? 'Opciones e imágenes' : 'Respuestas posibles'}</b>{options.map((op,i) => <div className="option-edit" key={i}><input required value={op} onChange={e => setOptions(v => v.map((x,j) => j === i ? e.target.value : x))} placeholder={kind === 'comparison' ? 'Nombre de la opción ' + (i+1) : 'Respuesta ' + (i+1)}/>{kind === 'comparison' && <label className="file-mini">Foto {i+1}<input required={i < 2 && !imageFiles[i]} type="file" accept="image/png,image/jpeg,image/webp,image/avif" onChange={e => setImageFiles(v => v.map((x,j) => j === i ? e.target.files?.[0] || null : x))}/></label>}</div>)}{options.length < (kind === 'comparison' ? 6 : 8) && <button type="button" className="add-option" onClick={() => {setOptions(v => [...v,'']);setImageFiles(v => [...v,null]);}}>＋ Añadir opción personalizada</button>}</div>}
+        {kind === 'comparison' && <div className="options-editor"><b>Opciones e imágenes</b>{options.map((op,i) => <div className="option-edit" key={i}><input required value={op} onChange={e => setOptions(v => v.map((x,j) => j === i ? e.target.value : x))} placeholder={'Nombre de la opción '+(i+1)}/><label className="file-mini">Foto {i+1}<input required={i < 2 && !imageFiles[i]} type="file" accept="image/png,image/jpeg,image/webp,image/avif" onChange={e => setImageFiles(v => v.map((x,j) => j === i ? e.target.files?.[0] || null : x))}/></label></div>)}{options.length < 6 && <button type="button" className="add-option" onClick={() => {setOptions(v => [...v,'']);setImageFiles(v => [...v,null]);}}>＋ Añadir opción personalizada</button>}</div>}
         <label className="check-row"><input type="checkbox" checked={anonymous} onChange={e => setAnonymous(e.target.checked)}/> Permitir participación anónima</label>
         <label className="check-row"><input type="checkbox" checked={publish} onChange={e => setPublish(e.target.checked)}/> Publicar al crear</label>
         <p className="tiny-note">Las confesiones solo serán visibles en tu panel privado. En las comparativas, evita calificar cuerpos o rostros de personas. No publiques datos personales de otras personas sin su permiso.</p>
@@ -475,10 +488,11 @@ function PublicProfile({ username, openAuth }) {
   return <PublicShell><section className="public-profile panel">{profile.avatar_url ? <img className="public-avatar" src={profile.avatar_url} alt=""/> : <div className="public-avatar avatar-placeholder">{profile.display_name.slice(0,1)}</div>}<div className="kicker">PERFIL PÚBLICO</div><h1>{profile.display_name}</h1><p className="subtle">@{profile.username}</p>{profile.bio && <p className="public-bio">{profile.bio}</p>}</section><section className="public-list"><div className="kicker">SUS EXPERIENCIAS</div><h2>Participa y descubre.</h2>{items.length ? <div className="my-grid">{items.map(x => <a className="my-card public-card" href={'#/e/' + x.slug} key={x.id}><span className="kind-icon">{kinds.find(k => k.id === x.kind)?.icon}</span><h3>{x.title}</h3><p>{x.description}</p><b>Abrir experiencia ↗</b></a>)}</div> : <div className="panel empty"><p>Aún no hay experiencias publicadas.</p></div>}</section><JoinCTA openAuth={openAuth}/></PublicShell>;
 }
 
-function PublicExperience({ slug, openAuth }) {
+function PublicExperience({ slug, openAuth, user }) {
   const [item, setItem] = useState(null);
   const [questions, setQuestions] = useState([]);
   const [owner, setOwner] = useState(null);
+  const [respondentProfile, setRespondentProfile] = useState(null);
   const [answers, setAnswers] = useState({});
   const [name, setName] = useState('');
   const [anonymous, setAnonymous] = useState(true);
@@ -486,32 +500,118 @@ function PublicExperience({ slug, openAuth }) {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [score, setScore] = useState(null);
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [allowAnonymous, setAllowAnonymous] = useState(true);
-  useEffect(() => { let live = true; (async () => { const { data: ex, error: exError } = await supabase.from('experiences').select('*').eq('slug', slug).eq('is_public',true).eq('status','published').maybeSingle(); if (exError || !ex) { if (live) setItem(false); return; } const [{ data: qs }, { data: p }] = await Promise.all([supabase.from('experience_questions').select('id,experience_id,position,prompt,answer_type,options').eq('experience_id',ex.id).order('position'),supabase.from('profiles').select('id,username,display_name').eq('id',ex.owner_id).maybeSingle()]); if (live) { setItem(ex); setQuestions(qs || []); setOwner(p); setAllowAnonymous(ex.settings?.allow_anonymous !== false); setAnonymous(ex.settings?.allow_anonymous !== false); trackActivity(ex.owner_id, ex.id, 'experience_view'); } })(); return () => { live = false; }; }, [slug]);
+  const quizMode = item?.kind === 'know_me';
+  const signedInName = respondentProfile?.display_name || user?.user_metadata?.display_name || user?.email?.split('@')[0] || '';
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const { data: ex, error: exError } = await supabase.from('experiences').select('*').eq('slug', slug).eq('is_public',true).eq('status','published').maybeSingle();
+      if (exError || !ex) { if (live) setItem(false); return; }
+      const [{ data: qs }, { data: p }, profileResult] = await Promise.all([
+        supabase.from('experience_questions').select('id,experience_id,position,prompt,answer_type,options').eq('experience_id',ex.id).order('position'),
+        supabase.from('profiles').select('id,username,display_name').eq('id',ex.owner_id).maybeSingle(),
+        user?.id ? supabase.from('profiles').select('display_name,avatar_url').eq('id',user.id).maybeSingle() : Promise.resolve({data:null,error:null})
+      ]);
+      if (live) {
+        setItem(ex); setQuestions(qs || []); setOwner(p);
+        setRespondentProfile(profileResult?.data || null);
+        if (profileResult?.data?.display_name) setName(profileResult.data.display_name);
+        setAllowAnonymous(ex.settings?.allow_anonymous !== false);
+        setAnonymous(ex.settings?.allow_anonymous !== false);
+        trackActivity(ex.owner_id, ex.id, 'experience_view');
+      }
+    })();
+    return () => { live = false; };
+  }, [slug, user?.id]);
+
+  function goNextQuestion() {
+    const current = questions[currentQuestionIndex];
+    if (!current || !String(answers[current.id] || '').trim()) {
+      setError('Selecciona una respuesta para continuar.');
+      return;
+    }
+    setError('');
+    setCurrentQuestionIndex(index => Math.min(index + 1, questions.length - 1));
+  }
+
   async function submit(e) {
     e.preventDefault(); setBusy(true); setError('');
     try {
       if (!supabase || !item) throw new Error('No se pudo conectar con esta experiencia.');
       const missing = questions.find(q => !String(answers[q.id] || '').trim());
-      if (missing) throw new Error('Responde la pregunta antes de enviar.');
-      const isAnon = allowAnonymous ? anonymous : false;
-      if (!isAnon && !name.trim()) throw new Error('Escribe el nombre que quieres mostrar.');
+      if (missing) throw new Error('Responde todas las preguntas antes de terminar.');
+      const isAnon = quizMode ? false : (allowAnonymous ? anonymous : false);
+      const respondentName = quizMode && user ? signedInName : name.trim();
+      if (!isAnon && !respondentName) throw new Error('Escribe el nombre que quieres mostrar.');
       const { data: result, error: e1 } = await supabase.rpc('submit_experience_entry', {
         p_experience_id: item.id,
-        p_respondent_name: isAnon ? null : name.trim(),
+        p_respondent_name: isAnon ? null : respondentName,
         p_is_anonymous: isAnon,
         p_answers: answers
       });
       if (e1) throw e1;
-      if (item.kind === 'know_me' && result?.total) setScore({ correct: Number(result.correct || 0), total: Number(result.total) });
-      await trackActivity(item.owner_id, item.id, 'experience_response'); setSuccess(true);
-    } catch (e1) { setError(e1.message); } finally { setBusy(false); }
+      if (quizMode && result?.total) {
+        setScore({ correct: Number(result.correct || 0), total: Number(result.total) });
+        const { data: board, error: boardError } = await supabase.rpc('get_experience_leaderboard', { p_experience_id: item.id });
+        if (boardError) throw boardError;
+        setLeaderboard(Array.isArray(board) ? board : []);
+      }
+      await trackActivity(item.owner_id, item.id, 'experience_response');
+      setSuccess(true);
+    } catch (e1) { setError(e1.message || 'No se pudo enviar la respuesta.'); }
+    finally { setBusy(false); }
   }
+
   if (item === null) return <PublicShell><div className="panel">Cargando experiencia…</div></PublicShell>;
   if (item === false) return <PublicShell><div className="panel empty"><h2>Este enlace no está disponible.</h2><a href={BASE}>Volver al inicio</a></div></PublicShell>;
-  return <PublicShell><section className="experience-public panel"><div className="kicker">{kinds.find(k => k.id === item.kind)?.short.toUpperCase()}</div><h1>{item.title}</h1><p className="subtle">{item.description}</p>{owner && <a className="owner-link" href={'#/u/' + owner.username}>Creado por {owner.display_name} · @{owner.username}</a>}
-    {success ? <div className="success-screen"><span>✓</span><h2>¡Respuesta enviada!</h2><p>Gracias por participar. Tu respuesta llegó a su creador.</p>{score && <div className="quiz-score"><b>{score.correct} / {score.total}</b><small>respuestas correctas</small><p>{score.correct === score.total ? '¡Excelente! Conoces muy bien a esta persona.' : score.correct >= Math.ceil(score.total/2) ? '¡Nada mal! Has acertado varias.' : '¡Ahora ya sabes un poco más sobre esta persona!'}</p></div>}</div> : <form className="form response-form" onSubmit={submit}>{questions.map(q => <div className="question-block" key={q.id}><h3>{q.prompt}</h3>{q.answer_type === 'text' ? <textarea required maxLength="1000" value={answers[q.id] || ''} onChange={e => setAnswers(v => ({...v,[q.id]:e.target.value}))} placeholder="Escribe tu mensaje…"/> : <div className="answer-options">{(q.options || []).map((op,i) => <label className={'answer-option ' + (answers[q.id] === op.label ? 'chosen' : '')} key={i}><input type="radio" name={q.id} checked={answers[q.id] === op.label} onChange={() => setAnswers(v => ({...v,[q.id]:op.label}))}/>{op.image_url && <img src={op.image_url} alt={op.label}/>}<span>{op.label}</span></label>)}</div>}</div>)}
-      {allowAnonymous && <label className="check-row"><input type="checkbox" checked={anonymous} onChange={e => setAnonymous(e.target.checked)}/> Enviar de forma anónima</label>}{(!allowAnonymous || !anonymous) && <label>Tu nombre<input required value={name} onChange={e => setName(e.target.value)} maxLength="60" placeholder="Cómo quieres aparecer"/></label>}<Notice error={error}/><Button disabled={busy}>{busy ? 'Enviando…' : 'Enviar respuesta ↗'}</Button><p className="tiny-note">No necesitas crear una cuenta para participar. Comparte solo información que te sientas cómodo enviando.</p></form>}
+  const progress = questions.length ? Math.round(((currentQuestionIndex + 1) / questions.length) * 100) : 0;
+  const visibleQuestions = quizMode ? questions.slice(currentQuestionIndex, currentQuestionIndex + 1) : questions;
+
+  return <PublicShell><section className="experience-public panel">
+    <div className="kicker">{kinds.find(k => k.id === item.kind)?.short.toUpperCase()}</div>
+    <h1>{item.title}</h1><p className="subtle">{item.description}</p>
+    {owner && <a className="owner-link" href={'#/u/' + owner.username}>Creado por {owner.display_name} · @{owner.username}</a>}
+    {success ? <div className="success-screen">
+      <span>✓</span><h2>¡Terminaste el reto!</h2><p>Tu participación quedó guardada.</p>
+      {score && <div className="quiz-result">
+        <div className="quiz-score"><b>{Math.round(score.correct * 100 / Math.max(1, score.total))}%</b><small>{score.correct} de {score.total} respuestas correctas</small><p>{score.correct === score.total ? '¡Perfecto! Conoces muy bien a esta persona.' : score.correct >= Math.ceil(score.total/2) ? '¡Muy bien! Has acertado varias.' : '¡Ya conoces un poco más sobre esta persona!'}</p></div>
+        <section className="leaderboard-panel">
+          <div className="kicker">CLASIFICACIÓN</div><h2>¿Quién conoce más?</h2>
+          {leaderboard.length ? <>
+            <div className="podium">{leaderboard.slice(0,3).map((person,index)=><article className={'podium-person podium-'+(index+1)} key={index}>
+              <div className="podium-avatar">{person.avatar_url ? <img src={person.avatar_url} alt=""/> : <span>{(person.display_name || '?').slice(0,1).toUpperCase()}</span>}<i>{index+1}</i></div>
+              <b>{person.display_name}</b><strong>{person.percentage}%</strong>
+            </article>)}</div>
+            <div className="leaderboard-list">{leaderboard.map(person=><article className="leaderboard-row" key={person.position}>
+              <b className="leaderboard-place">#{person.position}</b>
+              <div className="leaderboard-avatar">{person.avatar_url ? <img src={person.avatar_url} alt=""/> : <span>{(person.display_name || '?').slice(0,1).toUpperCase()}</span>}</div>
+              <div className="leaderboard-name"><b>{person.display_name}</b><small>{person.correct}/{person.total} aciertos</small></div>
+              <strong>{person.percentage}%</strong>
+              <div className="leaderboard-meter"><i style={{width:person.percentage+'%'}}/></div>
+            </article>)}</div>
+          </> : <p className="subtle">Todavía no hay participantes en la clasificación.</p>}
+        </section>
+      </div>}
+    </div> : <form className="form response-form" onSubmit={submit}>
+      {quizMode && <div className="quiz-progress-wrap"><div className="quiz-progress-label"><b>Pregunta {currentQuestionIndex+1} de {questions.length}</b><span>{progress}%</span></div><div className="quiz-progress-track"><i style={{width:progress+'%'}}/></div></div>}
+      {visibleQuestions.map(q => <div className="question-block quiz-question-live" key={q.id}>
+        <h3>{q.prompt}</h3>
+        {q.answer_type === 'text' ? <textarea required maxLength="1000" value={answers[q.id] || ''} onChange={e => setAnswers(v => ({...v,[q.id]:e.target.value}))} placeholder="Escribe tu mensaje…"/> : <div className="answer-options">{(q.options || []).map((op,i) => <label className={'answer-option ' + (answers[q.id] === op.label ? 'chosen' : '')} key={i}><input type="radio" name={q.id} checked={answers[q.id] === op.label} onChange={() => {setAnswers(v => ({...v,[q.id]:op.label}));setError('');}}/>{op.image_url && <img src={op.image_url} alt={op.label}/>}<span>{op.label}</span></label>)}</div>}
+      </div>)}
+      {quizMode && user && <div className="quiz-identity"><div className="quiz-identity-avatar">{respondentProfile?.avatar_url ? <img src={respondentProfile.avatar_url} alt=""/> : <span>{(signedInName || 'P').slice(0,1).toUpperCase()}</span>}</div><div><b>{signedInName || 'Tu perfil'}</b><small>Participarás con tu cuenta y tu foto de perfil</small></div></div>}
+      {quizMode && !user && <label>Tu nombre para aparecer en el ranking<input required value={name} onChange={e => setName(e.target.value)} maxLength="60" placeholder="Escribe tu nombre"/></label>}
+      {!quizMode && allowAnonymous && <label className="check-row"><input type="checkbox" checked={anonymous} onChange={e => setAnonymous(e.target.checked)}/> Enviar de forma anónima</label>}
+      {!quizMode && (!allowAnonymous || !anonymous) && <label>Tu nombre<input required value={name} onChange={e => setName(e.target.value)} maxLength="60" placeholder="Cómo quieres aparecer"/></label>}
+      <Notice error={error}/>
+      {quizMode && currentQuestionIndex < questions.length - 1
+        ? <div className="quiz-nav">{currentQuestionIndex > 0 && <button type="button" className="quiz-back" onClick={() => {setCurrentQuestionIndex(i => i-1);setError('');}}>← Anterior</button>}<Button type="button" onClick={goNextQuestion}>Siguiente pregunta →</Button></div>
+        : <Button disabled={busy}>{busy ? 'Enviando…' : quizMode ? 'Terminar y ver ranking ↗' : 'Enviar respuesta ↗'}</Button>}
+      <p className="tiny-note">No necesitas crear una cuenta para participar. Si tienes cuenta, el reto usará tu nombre y foto de perfil; si no, podrás participar con un nombre.</p>
+    </form>}
   </section><JoinCTA openAuth={openAuth}/></PublicShell>;
 }
 
