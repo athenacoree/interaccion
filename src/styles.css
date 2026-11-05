@@ -170,3 +170,61 @@
 .inbox-overview-row>button{flex:0 0 auto;border:0;border-radius:9px;padding:9px 11px;background:#f0f2ff;color:#6f7ed6;font-size:10px;font-weight:800}
 .inbox-unread-count{flex:0 0 auto;padding:5px 8px;border-radius:99px;background:#fff1e8;color:#b16e46;font-size:9px;font-weight:800}
 @media(max-width:560px){.inbox-overview-row{flex-wrap:wrap;gap:9px}.inbox-overview-info{flex-basis:calc(100% - 55px)}.inbox-overview-row>button{margin-left:auto}}
+
+
+/* Interacciones: bandeja modal y conversaciones privadas */
+.inbox-modal-backdrop{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(24,29,48,.42);backdrop-filter:blur(13px);-webkit-backdrop-filter:blur(13px);animation:inboxFade .2s ease both}
+.inbox-modal{width:min(900px,100%);max-height:min(90dvh,900px);overflow:auto;margin:0;padding:clamp(16px,3vw,30px);border:1px solid rgba(255,255,255,.8);border-radius:26px;background:linear-gradient(145deg,rgba(255,255,255,.98),rgba(247,248,255,.96));box-shadow:0 28px 90px rgba(23,30,60,.24);animation:inboxRise .28s cubic-bezier(.2,.8,.2,1) both}
+.inbox-modal .responses-head{position:sticky;top:-1px;z-index:2;padding:5px 0 16px;background:linear-gradient(180deg,#fff 82%,rgba(255,255,255,0));}
+.inbox-modal .responses-head h2{font-size:clamp(20px,4vw,28px);letter-spacing:-.04em}
+.inbox-modal .entry{margin:13px 0;padding:17px;border:1px solid #e8eaf3;border-radius:19px;background:rgba(255,255,255,.92);box-shadow:0 8px 26px rgba(40,48,80,.045);transition:transform .2s ease,box-shadow .2s ease}
+.inbox-modal .entry:hover{transform:translateY(-2px);box-shadow:0 13px 32px rgba(40,48,80,.08)}
+.inbox-modal .entry-unread{border-color:#d7defd;box-shadow:inset 3px 0 #8795ef,0 8px 26px rgba(40,48,80,.045)}
+.inbox-modal .entry-answer{padding:12px 14px;border:1px solid #eef0f6;border-radius:13px;background:#fafbff}
+.inbox-modal .entry-answer p{white-space:pre-wrap;overflow-wrap:anywhere}
+.inbox-modal .entry-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:13px}
+.inbox-modal .entry-actions button{padding:8px 11px;border:1px solid #e9ebf4;border-radius:10px;background:#fff;color:#67718b;font-size:10px;font-weight:750}
+.conversation-box{margin-top:15px;overflow:hidden;border:1px solid #e6e9f4;border-radius:17px;background:linear-gradient(140deg,#fbfcff,#f5f7ff)}
+.conversation-toggle{width:100%;display:flex;align-items:center;gap:11px;padding:13px 14px;border:0;background:transparent;text-align:left;color:#30384d;cursor:pointer}
+.conversation-toggle-icon{width:37px;height:37px;display:grid;place-items:center;flex:0 0 auto;border-radius:12px;background:#e9edff;color:#7483dc;font-size:17px}
+.conversation-toggle>span:nth-child(2){display:grid;gap:4px;flex:1;min-width:0}
+.conversation-toggle b{font:800 12px Manrope,sans-serif}
+.conversation-toggle small{font-size:9px;color:#9098aa}
+.conversation-chevron{color:#8490bc;font-size:18px}
+.conversation-content{padding:0 13px 13px;animation:inboxRise .2s ease both}
+.conversation-note{display:flex;align-items:center;gap:7px;padding:9px 11px;border-radius:10px;background:#eef1ff;color:#7580b0;font-size:9px}
+.conversation-online-dot{width:7px;height:7px;border-radius:50%;background:#8ebd9e;box-shadow:0 0 0 4px rgba(142,189,158,.13)}
+.conversation-messages{display:flex;flex-direction:column;gap:10px;max-height:320px;min-height:112px;overflow:auto;padding:14px 3px;scrollbar-width:thin}
+.chat-bubble{width:fit-content;max-width:min(82%,520px);padding:11px 13px;border-radius:15px;box-shadow:0 4px 13px rgba(45,53,85,.045);animation:messagePop .24s cubic-bezier(.2,.8,.2,1) both}
+.chat-mine{align-self:flex-end;border:1px solid #dfe4ff;border-bottom-right-radius:5px;background:linear-gradient(145deg,#eef1ff,#e5eaff)}
+.chat-theirs{align-self:flex-start;border:1px solid #e9ebf2;border-bottom-left-radius:5px;background:#fff}
+.chat-bubble small{display:block;margin-bottom:5px;color:#8b93a7;font-size:8px}
+.chat-bubble p{margin:0;color:#394157;font-size:12px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
+.conversation-empty{display:grid;justify-items:center;align-content:center;gap:6px;min-height:100px;color:#9098aa;text-align:center;font-size:10px}
+.conversation-empty>span{font-size:22px;color:#8996e4}
+.conversation-empty b{color:#5b647b;font:800 11px Manrope}
+.conversation-empty small{font-size:9px}
+.conversation-composer{display:flex;align-items:flex-end;gap:9px;padding:8px;border:1px solid #e4e7f1;border-radius:15px;background:#fff;box-shadow:0 7px 20px rgba(40,48,80,.045)}
+.conversation-composer textarea{flex:1;min-width:0;max-height:110px;resize:vertical;border:0!important;outline:0!important;background:transparent!important;box-shadow:none!important;padding:8px 7px!important;color:#343c52;font:500 12px/1.5 Manrope,sans-serif}
+.conversation-composer button{width:39px;height:39px;flex:0 0 auto;display:grid;place-items:center;border:0;border-radius:12px;background:linear-gradient(145deg,#8795ef,#6e7cdb);color:white;box-shadow:0 6px 15px rgba(112,126,220,.28);cursor:pointer;overflow:visible}
+.conversation-composer button:disabled{opacity:.45;box-shadow:none;cursor:not-allowed}
+.send-plane{display:inline-block;font-size:17px;transform:rotate(-12deg)}
+.send-plane-flight{animation:planeLaunch .78s cubic-bezier(.18,.75,.25,1) both}
+.conversation-footer{display:flex;justify-content:space-between;gap:8px;padding:8px 2px 0;color:#9aa1b0;font-size:8px}
+.conversation-error{margin:8px 0 0;color:#b45c68;font-size:10px}
+@keyframes inboxFade{from{opacity:0}to{opacity:1}}
+@keyframes inboxRise{from{opacity:0;transform:translateY(12px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes messagePop{from{opacity:0;transform:translateY(7px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes planeLaunch{0%{transform:translate(0,0) rotate(-12deg) scale(1)}45%{transform:translate(8px,-8px) rotate(-18deg) scale(1.18)}100%{transform:translate(35px,-34px) rotate(-24deg) scale(.45);opacity:0}}
+@media(max-width:620px){
+  .inbox-modal-backdrop{align-items:flex-end;padding:0}
+  .inbox-modal{width:100%;max-height:94dvh;padding:17px 13px calc(18px + env(safe-area-inset-bottom));border-radius:25px 25px 0 0;border-bottom:0;animation:inboxRise .24s ease both}
+  .inbox-modal .entry{padding:12px;border-radius:16px}
+  .conversation-messages{max-height:270px}
+  .chat-bubble{max-width:90%}
+  .conversation-composer button{width:42px;height:42px}
+}
+@media(prefers-reduced-motion:reduce){
+  .inbox-modal-backdrop,.inbox-modal,.conversation-content,.chat-bubble,.send-plane-flight{animation:none!important}
+  .inbox-modal .entry{transition:none}
+}
