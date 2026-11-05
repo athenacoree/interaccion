@@ -228,3 +228,29 @@
   .inbox-modal-backdrop,.inbox-modal,.conversation-content,.chat-bubble,.send-plane-flight{animation:none!important}
   .inbox-modal .entry{transition:none}
 }
+
+
+/* Acabado visual del panel y controles */
+.dashbar{position:sticky;top:0;z-index:30;background:rgba(255,255,255,.82);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border-bottom:1px solid rgba(225,229,241,.8)}
+.dash-intro{padding:25px 26px;border:1px solid rgba(225,229,244,.9);border-radius:24px;background:radial-gradient(circle at 92% 5%,rgba(216,222,255,.72),transparent 34%),linear-gradient(130deg,#fff,#f8f9ff);box-shadow:0 14px 40px rgba(45,54,88,.055)}
+.dash-intro h1{letter-spacing:-.055em}
+.inbox-overview,.participant-history,.activity-panel{border-radius:23px;box-shadow:0 12px 34px rgba(45,54,88,.045)}
+.inbox-overview .dash-title h2,.participant-history .dash-title h2,.activity-panel .dash-title h2{letter-spacing:-.04em}
+.inbox-overview-row{transition:transform .2s ease,border-color .2s ease,box-shadow .2s ease}
+.inbox-overview-row:hover{transform:translateY(-2px);border-color:#d8def9;box-shadow:0 9px 24px rgba(52,63,108,.07)}
+.my-card{border-radius:21px;transition:transform .22s ease,box-shadow .22s ease,border-color .22s ease}
+.my-card:hover{transform:translateY(-4px);border-color:#dce1fa;box-shadow:0 16px 34px rgba(45,54,88,.09)}
+.conversation-note{justify-content:flex-start}
+.conversation-note>span:nth-child(2){flex:1;line-height:1.45}
+.conversation-note button{flex:0 0 auto;border:0;border-radius:8px;padding:6px 9px;background:rgba(255,255,255,.75);color:#6f7ed6;font-size:9px;font-weight:800}
+.responses-head .close-small{padding:9px 12px;border-radius:10px;background:#f0f2ff}
+.inbox-tools{position:sticky;top:55px;z-index:1;padding:10px 0;background:linear-gradient(180deg,#fff 75%,rgba(255,255,255,0))}
+@media(max-width:620px){
+  .dash-main{padding-top:24px}
+  .dash-intro{align-items:flex-start;padding:19px;border-radius:20px}
+  .dash-intro h1{font-size:29px}
+  .dash-intro>.btn{flex:0 0 auto}
+  .dash-actions{gap:8px}
+  .dash-actions>a{display:none}
+  .inbox-overview,.participant-history,.activity-panel{padding:15px;border-radius:19px}
+}
